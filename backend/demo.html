@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>TensorFarm NDVI Viewer</title>
+        <!-- Include Leaflet CSS and JS -->
+        <link
+            rel="stylesheet"
+            href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+        <!-- Include Chart.js -->
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                font-family: Arial, sans-serif;
+            }
+
+            #map {
+                height: 100vh;
+                width: 100%;
+            }
+            .control-panel {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                z-index: 1000;
+                background-color: white;
+                padding: 15px;
+                border-radius: 8px;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+                width: 300px;
+                max-height: 85vh;
+                overflow-y: auto;
+            }
+
+            .control-panel h3 {
+                margin-top: 0;
+                margin-bottom: 15px;
+                color: #2c3e50;
+                border-bottom: 1px solid #eee;
+                padding-bottom: 8px;
+            }
+
+            .control-panel button {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 8px 12px;
+                margin: 5px 5px 5px 0;
+                border-radius: 4px;
+                cursor: pointer;
+                font-weight: bold;
+            }
+
+            .control-panel button:hover {
+                background-color: #2980b9;
+            }
+
+            .control-panel button:disabled {
+                background-color: #bdc3c7;
+                cursor: not-allowed;
+            }
+
+            .control-panel select,
+            .control-panel input {
+                width: 100%;
+                padding: 6px;
+                margin-bottom: 5px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+
+            #status {
+                margin-top: 10px;
+                padding: 8px;
+                background-color: #f8f9fa;
+                border-radius: 4px;
+                font-style: italic;
+                min-height: 20px;
+            }
+
+            .legend {
+                line-height: 18px;
+                color: #555;
+                background-color: white;
+                padding: 10px;
+                border-radius: 8px;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+            }
+
+            .legend i {
+                width: 18px;
+                height: 18px;
+                float: left;
+                margin-right: 8px;
+                opacity: 0.7;
+            }
+
+            #timeSeriesContainer {
+                border-top: 1px solid #eee;
+                padding-top: 10px;
+                margin-top: 15px;
+            }
+
+            table {
+                border-collapse: collapse;
+                font-size: 0.8em;
+                width: 100%;
+            }
+
+            table,
+            th,
+            td {
+                border: 1px solid #ddd;
+            }
+
+            th,
+            td {
+                padding: 4px;
+                text-align: center;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+        <div class="control-panel">
+            <h3>TensorFarm NDVI Viewer</h3>
+
+            <div style="margin-bottom: 10px">
+                <label for="satellite">Satellite Source:</label>
+                <select id="satellite">
+                    <option value="sentinel-2">Sentinel-2</option>
+                    <option value="landsat-8">Landsat 8</option>
+                    <option value="landsat-9">Landsat 9</option>
+                </select>
+            </div>
+
+            <div style="margin-bottom: 10px">
+                <label for="startDate">Start Date:</label>
+                <input type="date" id="startDate" value="2024-11-01" />
+            </div>
+
+            <div style="margin-bottom: 10px">
+                <label for="endDate">End Date:</label>
+                <input type="date" id="endDate" value="2025-05-01" />
+            </div>
+
+            <div style="margin-bottom: 10px">
+                <label>
+                    <input type="checkbox" id="timeSeriesCheckbox" />
+                    Generate Time Series
+                </label>
+            </div>
+
+            <button id="drawPolygon">Draw Polygon</button>
+            <button id="fetchNDVI" disabled>Get NDVI</button>
+            <button id="clearMap">Clear Map</button>
+
+            <p id="status"></p>
+
+            <div
+                id="timeSeriesContainer"
+                style="display: none; margin-top: 15px"
+            >
+                <h4>Time Series Data</h4>
+                <div id="timeSeriesInfo"></div>
+                <canvas id="timeSeriesChart" width="280" height="180"></canvas>
+            </div>
+        </div>
+
+        <script>
+            // Initialize the map
+            const map = L.map("map").setView([43.6, -80.0], 12);
+
+            // Add base map layer
+            L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                attribution:
+                    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            }).addTo(map);
+
+            // Variables to store drawing items
+            let drawnItems = new L.FeatureGroup();
+            map.addLayer(drawnItems);
+
+            let drawControl;
+            let polygon;
+            let ndviLayer;
+
+            // Status display
+            const statusEl = document.getElementById("status");
+
+            // Button elements
+            const drawBtn = document.getElementById("drawPolygon");
+            const fetchBtn = document.getElementById("fetchNDVI");
+            const clearBtn = document.getElementById("clearMap");
+
+            drawBtn.addEventListener("click", function () {
+                // Clear previous drawings
+                drawnItems.clearLayers();
+
+                // Remove existing draw control if it exists
+                if (drawControl) {
+                    map.removeControl(drawControl);
+                }
+
+                // Add draw control
+                drawControl = new L.Control.Draw({
+                    draw: {
+                        polyline: false,
+                        polygon: true,
+                        rectangle: false,
+                        circle: false,
+                        marker: false,
+                        circlemarker: false,
+                    },
+                    edit: false,
+                });
+
+                map.addControl(drawControl);
+
+                statusEl.textContent = "Draw a polygon on the map";
+                fetchBtn.disabled = true;
+
+                // Listen for draw events
+                map.on(L.Draw.Event.CREATED, function (event) {
+                    polygon = event.layer;
+                    drawnItems.addLayer(polygon);
+
+                    // Enable fetch button
+                    fetchBtn.disabled = false;
+                    statusEl.textContent =
+                        'Polygon drawn. Click "Get NDVI" to fetch data.';
+
+                    // Remove draw control after drawing
+                    map.removeControl(drawControl);
+                    drawControl = null;
+                });
+            });
+
+            fetchBtn.addEventListener("click", function () {
+                if (!polygon) {
+                    statusEl.textContent =
+                        'No polygon drawn. Click "Draw Polygon" first.';
+                    return;
+                }
+
+                // Get polygon coordinates in GeoJSON format
+                const polygonGeoJSON = polygon.toGeoJSON();
+
+                statusEl.textContent = "Fetching NDVI data...";
+
+                // Make a request to the backend API                // Get form values
+                const satellite = document.getElementById("satellite").value;
+                const startDate = document.getElementById("startDate").value;
+                const endDate = document.getElementById("endDate").value;
+                const timeSeries =
+                    document.getElementById("timeSeriesCheckbox").checked;
+
+                fetch("http://localhost:8000/ndvi-tiles/", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        polygon: polygonGeoJSON.geometry,
+                        satellite_source: satellite,
+                        start_date: startDate,
+                        end_date: endDate,
+                        time_series: timeSeries,
+                    }),
+                })
+                    .then((response) => {
+                        if (!response.ok) {
+                            throw new Error(
+                                `HTTP error! Status: ${response.status}`
+                            );
+                        }
+                        return response.json();
+                    })
+                    .then((data) => {
+                        // Remove existing NDVI layer if it exists
+                        if (ndviLayer) {
+                            map.removeLayer(ndviLayer);
+                        }
+
+                        // If we have multiple layers, store them
+                        let layers = {};
+
+                        // Add the main NDVI layer
+                        ndviLayer = L.tileLayer(data.ndvi_tiles.url, {
+                            attribution: data.ndvi_tiles.attribution,
+                            maxZoom: 18,
+                        }).addTo(map);
+
+                        layers["NDVI Median"] = ndviLayer;
+
+                        // Get the time series data if available
+                        const timeSeriesContainer = document.getElementById(
+                            "timeSeriesContainer"
+                        );
+                        const timeSeriesInfo =
+                            document.getElementById("timeSeriesInfo");
+
+                        if (data.time_series) {
+                            // Show time series container
+                            timeSeriesContainer.style.display = "block";
+
+                            if (
+                                data.time_series.data &&
+                                data.time_series.data.length > 0
+                            ) {
+                                // Display basic info
+                                timeSeriesInfo.innerHTML = `
+                                    <p>Found ${
+                                        data.time_series.count
+                                    } dates with NDVI data.</p>
+                                    <p>Date range: ${
+                                        data.time_series.data[0].date
+                                    } to ${
+                                    data.time_series.data[
+                                        data.time_series.data.length - 1
+                                    ].date
+                                }</p>
+                                `;
+
+                                // Create a simple chart of NDVI values over time
+                                const ctx = document
+                                    .getElementById("timeSeriesChart")
+                                    .getContext("2d");
+
+                                // Prepare data for the chart
+                                const labels = data.time_series.data.map(
+                                    (item) => item.date
+                                );
+                                const ndviValues = data.time_series.data.map(
+                                    (item) => item.ndvi
+                                );
+
+                                // Draw chart if Chart.js is available
+                                if (window.Chart) {
+                                    new Chart(ctx, {
+                                        type: "line",
+                                        data: {
+                                            labels: labels,
+                                            datasets: [
+                                                {
+                                                    label: "NDVI Value",
+                                                    data: ndviValues,
+                                                    borderColor:
+                                                        "rgb(75, 192, 192)",
+                                                    tension: 0.1,
+                                                    fill: false,
+                                                },
+                                            ],
+                                        },
+                                        options: {
+                                            scales: {
+                                                y: {
+                                                    min: 0,
+                                                    max: 1,
+                                                },
+                                            },
+                                            responsive: true,
+                                            maintainAspectRatio: false,
+                                        },
+                                    });
+                                } else {
+                                    // Basic visualization if Chart.js is not available
+                                    timeSeriesInfo.innerHTML +=
+                                        "<p>Load Chart.js for better visualization</p>";
+
+                                    // Create a simple HTML table visualization
+                                    let tableHtml =
+                                        '<table style="width:100%;"><tr><th>Date</th><th>NDVI</th></tr>';
+                                    for (
+                                        let i = 0;
+                                        i < data.time_series.data.length;
+                                        i++
+                                    ) {
+                                        tableHtml += `<tr><td>${
+                                            data.time_series.data[i].date
+                                        }</td><td>${data.time_series.data[
+                                            i
+                                        ].ndvi.toFixed(3)}</td></tr>`;
+                                    }
+                                    tableHtml += "</table>";
+                                    timeSeriesInfo.innerHTML += tableHtml;
+                                }
+
+                                // Add RGB visualization if available
+                                if (data.time_series.rgb_visualization) {
+                                    const rgbLayer = L.tileLayer(
+                                        data.time_series.rgb_visualization.url,
+                                        {
+                                            attribution:
+                                                data.ndvi_tiles.attribution,
+                                            maxZoom: 18,
+                                        }
+                                    );
+
+                                    layers["RGB Time Comparison"] = rgbLayer;
+
+                                    // Add description
+                                    timeSeriesInfo.innerHTML += `
+                                        <p style="margin-top:10px;"><strong>RGB Visualization:</strong><br>
+                                        Red: ${data.time_series.rgb_visualization.dates[0]}<br>
+                                        Green: ${data.time_series.rgb_visualization.dates[1]}<br>
+                                        Blue: ${data.time_series.rgb_visualization.dates[2]}</p>
+                                    `;
+                                }
+                            } else {
+                                timeSeriesInfo.innerHTML =
+                                    "<p>No time series data available for this area and date range.</p>";
+                            }
+                        } else {
+                            // Hide time series container
+                            timeSeriesContainer.style.display = "none";
+                        }
+
+                        // Add layer control if we have multiple layers
+                        if (Object.keys(layers).length > 1) {
+                            // Add layer control
+                            L.control.layers(layers).addTo(map);
+                        }
+
+                        statusEl.textContent = `NDVI data loaded successfully! Source: ${data.ndvi_tiles.satellite}`;
+
+                        // Add a legend for NDVI values
+                        if (!window.legend) {
+                            window.legend = L.control({
+                                position: "bottomright",
+                            });
+                            window.legend.onAdd = function () {
+                                const div = L.DomUtil.create("div", "legend");
+                                div.innerHTML =
+                                    "<h4>NDVI Values</h4>" +
+                                    '<i style="background: #FFFFFF"></i> 0.0 (Low)<br>' +
+                                    '<i style="background: #F1B555"></i> 0.25<br>' +
+                                    '<i style="background: #99B718"></i> 0.5<br>' +
+                                    '<i style="background: #3E8601"></i> 0.75<br>' +
+                                    '<i style="background: #004C00"></i> 1.0 (High)<br>' +
+                                    "<p>Higher values = Healthier vegetation</p>";
+                                return div;
+                            };
+                            window.legend.addTo(map);
+                        }
+                    })
+                    .catch((error) => {
+                        statusEl.textContent = `Error: ${error.message}`;
+                        console.error("Error:", error);
+                    });
+            });
+
+            clearBtn.addEventListener("click", function () {
+                // Clear drawn items
+                drawnItems.clearLayers();
+
+                // Remove NDVI layer if it exists
+                if (ndviLayer) {
+                    map.removeLayer(ndviLayer);
+                    ndviLayer = null;
+                }
+
+                // Remove legend if it exists
+                if (window.legend) {
+                    map.removeControl(window.legend);
+                    window.legend = null;
+                }
+
+                // Reset variables
+                polygon = null;
+
+                // Disable fetch button
+                fetchBtn.disabled = true;
+
+                statusEl.textContent =
+                    'Map cleared. Click "Draw Polygon" to start again.';
+            });
+
+            // Load Leaflet Draw plugin
+            document.addEventListener("DOMContentLoaded", function () {
+                const script = document.createElement("script");
+                script.src =
+                    "https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js";
+                document.head.appendChild(script);
+
+                // Also load the CSS
+                const link = document.createElement("link");
+                link.rel = "stylesheet";
+                link.href =
+                    "https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css";
+                document.head.appendChild(link);
+
+                statusEl.textContent = 'Ready. Click "Draw Polygon" to start.';
+            });
+        </script>
+    </body>
+</html>

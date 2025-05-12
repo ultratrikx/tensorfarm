@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+earthengine-api
+geojson
+pydantic
+python-multipart
+requests
