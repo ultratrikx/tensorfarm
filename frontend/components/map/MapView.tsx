@@ -14,13 +14,14 @@ type MapViewProps = {
         center: { lat: number; lng: number };
         coordinates: Array<[number, number]>;
     }) => void;
+    ndviTileUrl?: string;
 };
 
-export default function MapView({ onRegionSelect }: MapViewProps) {
+export default function MapView({ onRegionSelect, ndviTileUrl }: MapViewProps) {
     const mapRef = useRef<L.Map | null>(null);
     const mapContainerRef = useRef<HTMLDivElement>(null);
     const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
-
+    const ndviLayerRef = useRef<L.TileLayer | null>(null);
     useEffect(() => {
         // Make sure Leaflet markers work properly in Next.js
         // @ts-expect-error - This is a known issue with Leaflet in Next.js
@@ -178,9 +179,7 @@ export default function MapView({ onRegionSelect }: MapViewProps) {
             });
 
             new instructionControl().addTo(mapRef.current);
-        }
-
-        // Cleanup function to remove map
+        } // Cleanup function to remove map
         return () => {
             if (mapRef.current) {
                 mapRef.current.remove();
@@ -188,6 +187,26 @@ export default function MapView({ onRegionSelect }: MapViewProps) {
             }
         };
     }, [onRegionSelect]);
+
+    // Add or update NDVI tile layer when ndviTileUrl changes
+    useEffect(() => {
+        if (!mapRef.current) return;
+
+        // Remove previous NDVI layer if it exists
+        if (ndviLayerRef.current) {
+            mapRef.current.removeLayer(ndviLayerRef.current);
+            ndviLayerRef.current = null;
+        }
+
+        // Add new NDVI layer if URL is provided
+        if (ndviTileUrl) {
+            ndviLayerRef.current = L.tileLayer(ndviTileUrl, {
+                attribution: "Google Earth Engine | TensorFarm",
+                opacity: 0.7,
+                maxZoom: 19,
+            }).addTo(mapRef.current);
+        }
+    }, [ndviTileUrl]);
 
     return (
         <div className="relative h-full w-full">

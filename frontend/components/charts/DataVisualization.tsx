@@ -1,17 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+    Tabs,
+    TabsContent,
+    TabsList,
+    TabsTrigger,
+} from "../../components/ui/tabs";
 import {
     Card,
     CardContent,
     CardDescription,
     CardHeader,
     CardTitle,
-} from "@/components/ui/card";
+} from "../../components/ui/card";
 import {
-    AreaChart,
-    Area,
     XAxis,
     YAxis,
     CartesianGrid,
@@ -21,9 +24,12 @@ import {
     Line,
     LineChart,
 } from "recharts";
+import { NdviDataResponse } from "../../services/api";
+import { Loader2 } from "lucide-react";
+import { Alert, AlertDescription } from "../../components/ui/alert";
 
-// Sample data - in a real app, this would come from an API
-const generateData = (
+// Sample data - for fallback if API is not available (keeping for reference but not used)
+/* const generateData = (
     region: {
         name: string;
         center: { lat: number; lng: number };
@@ -63,7 +69,7 @@ const generateData = (
             baseValues[dataType][index] *
             (1 + regionFactor + (polygonFactor || 0)),
     }));
-};
+}; */
 
 // Define chart colors for each data type
 const chartColors: Record<string, string> = {
@@ -79,10 +85,16 @@ type DataVisualizationProps = {
         center: { lat: number; lng: number };
         coordinates: Array<[number, number]>;
     } | null;
+    ndviData: NdviDataResponse | null;
+    loading: boolean;
+    error: string | null;
 };
 
 export default function DataVisualization({
     selectedRegion,
+    ndviData,
+    loading,
+    error,
 }: DataVisualizationProps) {
     const [activeDatasets, setActiveDatasets] = useState<
         Record<string, boolean>
@@ -91,19 +103,12 @@ export default function DataVisualization({
         Temperature: true,
         Rainfall: true,
         "Land Cover": true,
-    });
-
-    // Toggle dataset visibility
+    }); // Toggle dataset visibility
     const toggleDataset = (dataset: string) => {
         setActiveDatasets((prev) => ({
             ...prev,
             [dataset]: !prev[dataset],
         }));
-    };
-
-    // Get all active datasets
-    const getActiveDatasets = () => {
-        return Object.keys(activeDatasets).filter((key) => activeDatasets[key]);
     };
     return (
         <div className="h-full w-full p-4 overflow-y-auto scrollable-panel">
@@ -136,16 +141,35 @@ export default function DataVisualization({
                     <TabsTrigger value="layersView">
                         Layer Management
                     </TabsTrigger>
-                </TabsList>
-
+                </TabsList>{" "}
                 <TabsContent value="timeSeriesView" className="space-y-4">
-                    {selectedRegion ? (
+                    {error && (
+                        <Alert variant="destructive">
+                            <AlertDescription>{error}</AlertDescription>
+                        </Alert>
+                    )}
+
+                    {loading && (
+                        <Card>
+                            <CardContent className="pt-6">
+                                <div className="flex justify-center items-center p-6">
+                                    <Loader2 className="h-8 w-8 animate-spin mr-2" />
+                                    <p>Loading data...</p>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
+
+                    {!loading &&
+                    selectedRegion &&
+                    ndviData?.time_series?.data &&
+                    ndviData.time_series.data.length > 0 ? (
                         <Card>
                             <CardHeader>
                                 <CardTitle>Time Series Data</CardTitle>
                                 <CardDescription>
                                     Viewing data for {selectedRegion.name} over
-                                    the past year
+                                    the selected period
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
@@ -167,38 +191,58 @@ export default function DataVisualization({
                                                 opacity={0.1}
                                             />
                                             <XAxis
-                                                dataKey="name"
+                                                dataKey="date"
                                                 allowDuplicatedCategory={false}
                                                 tick={{ fontSize: 12 }}
                                             />
-                                            <YAxis tick={{ fontSize: 12 }} />
-                                            <Tooltip />
-                                            <Legend />{" "}
-                                            {getActiveDatasets().map(
-                                                (dataType) => (
-                                                    <Line
-                                                        key={dataType}
-                                                        type="monotone"
-                                                        data={generateData(
-                                                            selectedRegion,
-                                                            dataType
-                                                        )}
-                                                        dataKey="value"
-                                                        name={dataType}
-                                                        stroke={
-                                                            chartColors[
-                                                                dataType
-                                                            ]
-                                                        }
-                                                        strokeWidth={2}
-                                                        dot={{ r: 3 }}
-                                                        activeDot={{ r: 5 }}
-                                                    />
-                                                )
-                                            )}
+                                            <YAxis
+                                                tick={{ fontSize: 12 }}
+                                                domain={[0, 1]}
+                                                label={{
+                                                    value: "NDVI Value",
+                                                    angle: -90,
+                                                    position: "insideLeft",
+                                                    style: {
+                                                        textAnchor: "middle",
+                                                    },
+                                                }}
+                                            />
+                                            <Tooltip
+                                                formatter={(value) => [
+                                                    Number(value).toFixed(3),
+                                                    "NDVI",
+                                                ]}
+                                                labelFormatter={(label) =>
+                                                    `Date: ${label}`
+                                                }
+                                            />
+                                            <Legend />
+                                            <Line
+                                                type="monotone"
+                                                data={
+                                                    ndviData?.time_series
+                                                        ?.data || []
+                                                }
+                                                dataKey="ndvi"
+                                                name="NDVI"
+                                                stroke={chartColors.NDVI}
+                                                strokeWidth={2}
+                                                dot={{ r: 3 }}
+                                                activeDot={{ r: 5 }}
+                                            />
                                         </LineChart>
                                     </ResponsiveContainer>
                                 </div>
+                            </CardContent>
+                        </Card>
+                    ) : !loading && selectedRegion ? (
+                        <Card>
+                            <CardContent className="pt-6">
+                                <p className="text-center text-muted-foreground">
+                                    {ndviData
+                                        ? "No time series data available for this region"
+                                        : "Select a region on the map to view time series data"}
+                                </p>
                             </CardContent>
                         </Card>
                     ) : (
@@ -211,8 +255,7 @@ export default function DataVisualization({
                             </CardContent>
                         </Card>
                     )}
-                </TabsContent>
-
+                </TabsContent>{" "}
                 <TabsContent value="layersView" className="space-y-4">
                     <Card>
                         <CardHeader>
@@ -249,103 +292,212 @@ export default function DataVisualization({
                         </CardContent>
                     </Card>
 
-                    {selectedRegion && getActiveDatasets().length > 0 && (
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Active Layers</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="space-y-4">
-                                    {getActiveDatasets().map((dataType) => (
-                                        <div
-                                            key={dataType}
-                                            className="space-y-2"
-                                        >
+                    {/* Weather data section */}
+                    {selectedRegion &&
+                        ndviData?.weather &&
+                        activeDatasets["Temperature"] && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Weather Data</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="space-y-4">
+                                        <div className="space-y-2">
                                             <div className="flex justify-between items-center">
                                                 <h4 className="font-medium">
-                                                    {dataType}
+                                                    Temperature & Precipitation
                                                 </h4>
-                                                <div
-                                                    className="w-3 h-3 rounded-full"
-                                                    style={{
-                                                        backgroundColor:
-                                                            chartColors[
-                                                                dataType
-                                                            ],
-                                                    }}
-                                                />
                                             </div>
-                                            <div className="h-[100px] w-full">
+                                            <div className="h-[150px] w-full">
                                                 <ResponsiveContainer
                                                     width="100%"
                                                     height="100%"
                                                 >
-                                                    <AreaChart
-                                                        data={generateData(
-                                                            selectedRegion,
-                                                            dataType
-                                                        )}
+                                                    <LineChart
+                                                        data={
+                                                            ndviData.weather
+                                                                .data || []
+                                                        }
+                                                        margin={{
+                                                            top: 5,
+                                                            right: 20,
+                                                            left: 10,
+                                                            bottom: 5,
+                                                        }}
                                                     >
-                                                        <defs>
-                                                            <linearGradient
-                                                                id={`gradient-${dataType}`}
-                                                                x1="0"
-                                                                y1="0"
-                                                                x2="0"
-                                                                y2="1"
-                                                            >
-                                                                <stop
-                                                                    offset="5%"
-                                                                    stopColor={
-                                                                        chartColors[
-                                                                            dataType
-                                                                        ]
-                                                                    }
-                                                                    stopOpacity={
-                                                                        0.8
-                                                                    }
-                                                                />
-                                                                <stop
-                                                                    offset="95%"
-                                                                    stopColor={
-                                                                        chartColors[
-                                                                            dataType
-                                                                        ]
-                                                                    }
-                                                                    stopOpacity={
-                                                                        0.1
-                                                                    }
-                                                                />
-                                                            </linearGradient>
-                                                        </defs>
+                                                        <CartesianGrid
+                                                            strokeDasharray="3 3"
+                                                            opacity={0.1}
+                                                        />
                                                         <XAxis
-                                                            dataKey="name"
+                                                            dataKey="date"
                                                             tick={{
                                                                 fontSize: 10,
                                                             }}
-                                                            tickLine={false}
-                                                            axisLine={false}
                                                         />
-                                                        <Area
-                                                            type="monotone"
-                                                            dataKey="value"
+                                                        <YAxis
+                                                            yAxisId="temp"
+                                                            orientation="left"
                                                             stroke={
-                                                                chartColors[
-                                                                    dataType
-                                                                ]
+                                                                chartColors.Temperature
                                                             }
-                                                            fillOpacity={1}
-                                                            fill={`url(#gradient-${dataType})`}
+                                                            label={{
+                                                                value: "°C",
+                                                                position:
+                                                                    "insideLeft",
+                                                                style: {
+                                                                    textAnchor:
+                                                                        "middle",
+                                                                },
+                                                            }}
                                                         />
-                                                    </AreaChart>
+                                                        <YAxis
+                                                            yAxisId="precip"
+                                                            orientation="right"
+                                                            stroke={
+                                                                chartColors.Rainfall
+                                                            }
+                                                            label={{
+                                                                value: "mm",
+                                                                position:
+                                                                    "insideRight",
+                                                                style: {
+                                                                    textAnchor:
+                                                                        "middle",
+                                                                },
+                                                            }}
+                                                        />
+                                                        <Tooltip />
+                                                        <Legend />
+                                                        <Line
+                                                            yAxisId="temp"
+                                                            type="monotone"
+                                                            dataKey="temperature_celsius"
+                                                            name="Temperature (°C)"
+                                                            stroke={
+                                                                chartColors.Temperature
+                                                            }
+                                                            activeDot={{ r: 5 }}
+                                                        />
+                                                        <Line
+                                                            yAxisId="precip"
+                                                            type="monotone"
+                                                            dataKey="precipitation_mm"
+                                                            name="Precipitation (mm)"
+                                                            stroke={
+                                                                chartColors.Rainfall
+                                                            }
+                                                            activeDot={{ r: 5 }}
+                                                        />
+                                                    </LineChart>
                                                 </ResponsiveContainer>
                                             </div>
                                         </div>
-                                    ))}
-                                </div>
-                            </CardContent>
-                        </Card>
-                    )}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
+
+                    {/* Land Cover data section */}
+                    {selectedRegion &&
+                        ndviData?.landcover &&
+                        activeDatasets["Land Cover"] && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Land Cover Data</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="space-y-4">
+                                        <div>
+                                            <h4 className="font-medium mb-2">
+                                                Dominant Land Cover:{" "}
+                                                {
+                                                    ndviData.landcover
+                                                        .land_cover
+                                                        .dominant_class
+                                                }
+                                            </h4>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {" "}
+                                                {Object.entries(
+                                                    ndviData.landcover
+                                                        .land_cover.classes
+                                                ).map(([className, data]) => {
+                                                    // Define proper type for the data
+                                                    type LandCoverDataType = {
+                                                        percentage: number;
+                                                        area_hectares: number;
+                                                    };
+                                                    const landCoverData =
+                                                        data as LandCoverDataType;
+                                                    return (
+                                                        <div
+                                                            key={className}
+                                                            className="border rounded p-2 text-sm"
+                                                        >
+                                                            <div className="font-medium">
+                                                                {className}
+                                                            </div>
+                                                            <div className="text-muted-foreground">
+                                                                {landCoverData.percentage.toFixed(
+                                                                    1
+                                                                )}
+                                                                % (
+                                                                {landCoverData.area_hectares.toFixed(
+                                                                    1
+                                                                )}{" "}
+                                                                ha)
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <h4 className="font-medium mb-2">
+                                                Vegetation Cover
+                                            </h4>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                <div className="border rounded p-2 text-sm bg-green-50">
+                                                    <div className="font-medium">
+                                                        Trees
+                                                    </div>
+                                                    <div className="text-muted-foreground">
+                                                        {ndviData.landcover.vegetation.tree_cover_percent.toFixed(
+                                                            1
+                                                        )}
+                                                        %
+                                                    </div>
+                                                </div>
+                                                <div className="border rounded p-2 text-sm bg-yellow-50">
+                                                    <div className="font-medium">
+                                                        Non-tree
+                                                    </div>
+                                                    <div className="text-muted-foreground">
+                                                        {ndviData.landcover.vegetation.non_tree_vegetation_percent.toFixed(
+                                                            1
+                                                        )}
+                                                        %
+                                                    </div>
+                                                </div>
+                                                <div className="border rounded p-2 text-sm bg-gray-50">
+                                                    <div className="font-medium">
+                                                        Non-veg
+                                                    </div>
+                                                    <div className="text-muted-foreground">
+                                                        {ndviData.landcover.vegetation.non_vegetated_percent.toFixed(
+                                                            1
+                                                        )}
+                                                        %
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
                 </TabsContent>
             </Tabs>
         </div>
