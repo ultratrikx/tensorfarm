@@ -27,49 +27,10 @@ import {
 import { NdviDataResponse } from "../../services/api";
 import { Loader2 } from "lucide-react";
 import { Alert, AlertDescription } from "../../components/ui/alert";
-
-// Sample data - for fallback if API is not available (keeping for reference but not used)
-/* const generateData = (
-    region: {
-        name: string;
-        center: { lat: number; lng: number };
-        coordinates: Array<[number, number]>;
-    },
-    dataType: string
-) => {
-    const months = [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec",
-    ];
-
-    const baseValues: Record<string, number[]> = {
-        NDVI: [0.2, 0.25, 0.4, 0.6, 0.7, 0.75, 0.8, 0.75, 0.6, 0.4, 0.3, 0.2],
-        Temperature: [5, 7, 10, 15, 20, 25, 27, 26, 22, 15, 10, 6],
-        Rainfall: [50, 40, 45, 55, 40, 30, 20, 25, 35, 45, 50, 55],
-        "Land Cover": [60, 62, 65, 68, 70, 72, 70, 68, 65, 63, 62, 60],
-    };
-
-    // Add some randomness based on region name and polygon size
-    const regionFactor = (region.name.length % 5) / 10;
-    const polygonFactor =
-        region.coordinates.length > 0 ? region.coordinates.length / 50 : 0;
-    return months.map((month, index) => ({
-        name: month,
-        value:
-            baseValues[dataType][index] *
-            (1 + regionFactor + (polygonFactor || 0)),
-    }));
-}; */
+import { format } from "date-fns";
+import { DateRange } from "react-day-picker";
+import { DateRangePicker } from "../../components/ui/date-range-picker/date-range-picker";
+import { Button } from "../../components/ui/button/index";
 
 // Define chart colors for each data type
 const chartColors: Record<string, string> = {
@@ -88,6 +49,10 @@ type DataVisualizationProps = {
     ndviData: NdviDataResponse | null;
     loading: boolean;
     error: string | null;
+    startDate: string;
+    endDate: string;
+    onDateChange: (startDate: string, endDate: string) => void;
+    onClearRegion?: () => void;
 };
 
 export default function DataVisualization({
@@ -95,6 +60,10 @@ export default function DataVisualization({
     ndviData,
     loading,
     error,
+    startDate,
+    endDate,
+    onDateChange,
+    onClearRegion,
 }: DataVisualizationProps) {
     const [activeDatasets, setActiveDatasets] = useState<
         Record<string, boolean>
@@ -104,35 +73,70 @@ export default function DataVisualization({
         Rainfall: true,
         "Land Cover": true,
     }); // Toggle dataset visibility
+
+    // Convert string dates to Date objects for the date picker
+    const [dateRange, setDateRange] = useState<DateRange | undefined>({
+        from: startDate ? new Date(startDate) : undefined,
+        to: endDate ? new Date(endDate) : undefined,
+    });
+
+    // Handle date range changes and propagate to parent
+    const handleDateRangeChange = (range: DateRange | undefined) => {
+        setDateRange(range);
+
+        if (range?.from) {
+            const newStartDate = format(range.from, "yyyy-MM-dd");
+            const newEndDate = range.to
+                ? format(range.to, "yyyy-MM-dd")
+                : newStartDate;
+            onDateChange(newStartDate, newEndDate);
+        }
+    };
+
     const toggleDataset = (dataset: string) => {
         setActiveDatasets((prev) => ({
             ...prev,
             [dataset]: !prev[dataset],
         }));
     };
+
     return (
         <div className="h-full w-full p-4 overflow-y-auto scrollable-panel">
+            {" "}
             <Card className="w-full mb-4">
                 <CardHeader>
-                    <CardTitle>
-                        {selectedRegion
-                            ? selectedRegion.name
-                            : "Select a region"}
-                    </CardTitle>{" "}
-                    <CardDescription>
-                        {selectedRegion
-                            ? `Latitude: ${selectedRegion.center.lat.toFixed(
-                                  4
-                              )}, Longitude: ${selectedRegion.center.lng.toFixed(
-                                  4
-                              )}, Area Points: ${
-                                  selectedRegion.coordinates.length
-                              }`
-                            : "Draw a polygon on the map to select a region for analysis"}
-                    </CardDescription>
+                    <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                            <CardTitle>
+                                {selectedRegion
+                                    ? selectedRegion.name
+                                    : "Select a region"}
+                            </CardTitle>
+                            <CardDescription>
+                                {selectedRegion
+                                    ? `Latitude: ${selectedRegion.center.lat.toFixed(
+                                          4
+                                      )}, Longitude: ${selectedRegion.center.lng.toFixed(
+                                          4
+                                      )}, Area Points: ${
+                                          selectedRegion.coordinates.length
+                                      }`
+                                    : "Draw a polygon on the map to select a region for analysis"}
+                            </CardDescription>
+                        </div>
+                        {selectedRegion && onClearRegion && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={onClearRegion}
+                                className="ml-2"
+                            >
+                                Clear Region
+                            </Button>
+                        )}
+                    </div>
                 </CardHeader>
             </Card>
-
             <Tabs defaultValue="timeSeriesView" className="w-full">
                 <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="timeSeriesView">
@@ -143,6 +147,23 @@ export default function DataVisualization({
                     </TabsTrigger>
                 </TabsList>{" "}
                 <TabsContent value="timeSeriesView" className="space-y-4">
+                    {/* Date Range Picker */}
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Date Range Selection</CardTitle>
+                            <CardDescription>
+                                Select a time period for the analysis
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <DateRangePicker
+                                dateRange={dateRange}
+                                setDateRange={handleDateRangeChange}
+                                className="w-full"
+                            />
+                        </CardContent>
+                    </Card>
+
                     {error && (
                         <Alert variant="destructive">
                             <AlertDescription>{error}</AlertDescription>
@@ -168,8 +189,13 @@ export default function DataVisualization({
                             <CardHeader>
                                 <CardTitle>Time Series Data</CardTitle>
                                 <CardDescription>
-                                    Viewing data for {selectedRegion.name} over
-                                    the selected period
+                                    Viewing data for {selectedRegion.name} from{" "}
+                                    {format(
+                                        new Date(startDate),
+                                        "MMM dd, yyyy"
+                                    )}{" "}
+                                    to{" "}
+                                    {format(new Date(endDate), "MMM dd, yyyy")}
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
@@ -240,7 +266,7 @@ export default function DataVisualization({
                             <CardContent className="pt-6">
                                 <p className="text-center text-muted-foreground">
                                     {ndviData
-                                        ? "No time series data available for this region"
+                                        ? "No time series data available for this region and date range"
                                         : "Select a region on the map to view time series data"}
                                 </p>
                             </CardContent>
@@ -255,7 +281,7 @@ export default function DataVisualization({
                             </CardContent>
                         </Card>
                     )}
-                </TabsContent>{" "}
+                </TabsContent>
                 <TabsContent value="layersView" className="space-y-4">
                     <Card>
                         <CardHeader>

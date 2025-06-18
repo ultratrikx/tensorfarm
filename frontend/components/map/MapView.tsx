@@ -15,13 +15,25 @@ type MapViewProps = {
         coordinates: Array<[number, number]>;
     }) => void;
     ndviTileUrl?: string;
+    userLocation?: { lat: number; lng: number } | null;
+    selectedRegion?: {
+        name: string;
+        center: { lat: number; lng: number };
+        coordinates: Array<[number, number]>;
+    } | null;
 };
 
-export default function MapView({ onRegionSelect, ndviTileUrl }: MapViewProps) {
+export default function MapView({
+    onRegionSelect,
+    ndviTileUrl,
+    userLocation,
+    selectedRegion,
+}: MapViewProps) {
     const mapRef = useRef<L.Map | null>(null);
     const mapContainerRef = useRef<HTMLDivElement>(null);
     const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
     const ndviLayerRef = useRef<L.TileLayer | null>(null);
+    const currentPolygonRef = useRef<L.Polygon | null>(null);
     useEffect(() => {
         // Make sure Leaflet markers work properly in Next.js
         // @ts-expect-error - This is a known issue with Leaflet in Next.js
@@ -32,14 +44,17 @@ export default function MapView({ onRegionSelect, ndviTileUrl }: MapViewProps) {
             shadowUrl: "/leaflet/marker-shadow.png",
         });
 
-        if (!mapContainerRef.current) return;
-
-        // Initialize map only if it hasn't been initialized
+        if (!mapContainerRef.current) return; // Initialize map only if it hasn't been initialized
         if (!mapRef.current) {
-            // Center on a default location
+            // Center on user location if available, otherwise use default location
+            const initialCenter = userLocation
+                ? [userLocation.lat, userLocation.lng]
+                : [51.505, -0.09];
+            const initialZoom = userLocation ? 10 : 3;
+
             mapRef.current = L.map(mapContainerRef.current).setView(
-                [51.505, -0.09],
-                3
+                initialCenter as [number, number],
+                initialZoom
             );
 
             // Add OpenStreetMap tiles
@@ -86,8 +101,11 @@ export default function MapView({ onRegionSelect, ndviTileUrl }: MapViewProps) {
 
                 // Add the layer to the feature group
                 if (drawnItemsRef.current) {
-                    // Clear any existing layers first
+                    // Clear any existing layers first (only one polygon at a time)
                     drawnItemsRef.current.clearLayers();
+
+                    // Store reference to current polygon
+                    currentPolygonRef.current = layer;
 
                     // Add the new layer
                     drawnItemsRef.current.addLayer(layer);
@@ -106,6 +124,7 @@ export default function MapView({ onRegionSelect, ndviTileUrl }: MapViewProps) {
                     const name = `Selected Region (${center.lat.toFixed(
                         4
                     )}, ${center.lng.toFixed(4)})`;
+
                     // Add the region data to parent component
                     onRegionSelect({
                         name,
@@ -116,15 +135,16 @@ export default function MapView({ onRegionSelect, ndviTileUrl }: MapViewProps) {
                     // Add a popup with the area name
                     layer.bindPopup(name).openPopup();
                 }
-            });
-
-            // Event handler for when a polygon is edited
+            }); // Event handler for when a polygon is edited
             mapRef.current.on(L.Draw.Event.EDITED, (e: L.LeafletEvent) => {
                 const event = e as unknown as { layers: L.LayerGroup };
                 const layers = event.layers;
                 layers.eachLayer((layer) => {
                     // Cast layer to Polygon
                     const polygon = layer as unknown as L.Polygon;
+
+                    // Update the current polygon reference
+                    currentPolygonRef.current = polygon;
 
                     // Get the updated polygon coordinates
                     const latLngs = polygon.getLatLngs()[0] as L.LatLng[];
@@ -150,10 +170,11 @@ export default function MapView({ onRegionSelect, ndviTileUrl }: MapViewProps) {
                     // Update popup
                     polygon.bindPopup(name).openPopup();
                 });
-            });
-
-            // Event handler for when a polygon is deleted
+            }); // Event handler for when a polygon is deleted
             mapRef.current.on(L.Draw.Event.DELETED, () => {
+                // Clear the current polygon reference
+                currentPolygonRef.current = null;
+
                 // Clear the selected region when deleted
                 onRegionSelect({
                     name: "",
@@ -186,7 +207,7 @@ export default function MapView({ onRegionSelect, ndviTileUrl }: MapViewProps) {
                 mapRef.current = null;
             }
         };
-    }, [onRegionSelect]);
+    }, [onRegionSelect, userLocation]);
 
     // Add or update NDVI tile layer when ndviTileUrl changes
     useEffect(() => {
@@ -206,7 +227,43 @@ export default function MapView({ onRegionSelect, ndviTileUrl }: MapViewProps) {
                 maxZoom: 19,
             }).addTo(mapRef.current);
         }
-    }, [ndviTileUrl]);
+    }, [ndviTileUrl]); // Display selected region on the map (only when there's no current polygon from drawing)
+    useEffect(() => {
+        if (!mapRef.current || !drawnItemsRef.current) return;
+
+        // Only restore the polygon if we don't already have one from drawing
+        // This prevents conflicts with the drawing tools
+        if (
+            selectedRegion?.coordinates &&
+            selectedRegion.coordinates.length > 0 &&
+            !currentPolygonRef.current
+        ) {
+            // Convert to Leaflet LatLngs
+            const latLngs = selectedRegion.coordinates.map(
+                ([lat, lng]) => new L.LatLng(lat, lng)
+            );
+
+            // Create a polygon and add it to the map
+            const polygon = new L.Polygon(latLngs, {
+                color: "#3388ff",
+                weight: 3,
+                opacity: 0.8,
+                fillOpacity: 0.2,
+            });
+
+            // Store reference to current polygon
+            currentPolygonRef.current = polygon;
+
+            // Add to drawn items layer
+            drawnItemsRef.current.addLayer(polygon);
+
+            // Add a popup with the region name
+            polygon.bindPopup(selectedRegion.name);
+
+            // Fit map to polygon bounds
+            mapRef.current.fitBounds(polygon.getBounds());
+        }
+    }, [selectedRegion]);
 
     return (
         <div className="relative h-full w-full">

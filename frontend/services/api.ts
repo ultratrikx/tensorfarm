@@ -119,10 +119,19 @@ export async function getNdviData(
     options: ApiOptions = {}
 ): Promise<NdviDataResponse> {
     try {
+        // Get the current date and three months ago for default date range
+        const today = new Date();
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setMonth(today.getMonth() - 3);
+
+        // Format dates as YYYY-MM-DD
+        const defaultStartDate = threeMonthsAgo.toISOString().split("T")[0];
+        const defaultEndDate = today.toISOString().split("T")[0];
+
         const defaultOptions: ApiOptions = {
             satellite_source: "sentinel-2",
-            start_date: "2024-11-01",
-            end_date: "2025-05-01",
+            start_date: defaultStartDate,
+            end_date: defaultEndDate,
             time_series: true,
             include_weather: true,
             include_topography: false,

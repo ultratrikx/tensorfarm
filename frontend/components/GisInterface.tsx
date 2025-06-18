@@ -7,11 +7,11 @@ import {
     createGeoJsonPolygon,
     getNdviData,
     NdviDataResponse,
-    GeoJsonPolygon,
 } from "../services/api";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Button } from "../components/ui/button";
 import { Loader2 } from "lucide-react";
+import { format, subMonths } from "date-fns";
 
 // Import MapView dynamically with no SSR to avoid Leaflet issues
 const MapView = dynamic(() => import("../components/map/MapView"), {
@@ -34,6 +34,37 @@ export default function GisInterface() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // Set up default date range (last 3 months to current date)
+    const today = new Date();
+    const threeMonthsAgo = subMonths(today, 3);
+
+    // Date range state for time series (using proper ISO string format)
+    const [startDate, setStartDate] = useState<string>(
+        format(threeMonthsAgo, "yyyy-MM-dd")
+    );
+    const [endDate, setEndDate] = useState<string>(format(today, "yyyy-MM-dd"));
+    const [userLocation, setUserLocation] = useState<{
+        lat: number;
+        lng: number;
+    } | null>(null);
+
+    // Get user location on component mount
+    useEffect(() => {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    setUserLocation({
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude,
+                    });
+                },
+                (error) => {
+                    console.error("Error getting user location:", error);
+                }
+            );
+        }
+    }, []);
+
     // Fetch data when a region is selected
     useEffect(() => {
         async function fetchData() {
@@ -51,11 +82,13 @@ export default function GisInterface() {
                     selectedRegion.coordinates
                 );
 
-                // Fetch data from API
+                // Fetch data from API using the selected date range
                 const data = await getNdviData(geoJsonPolygon, {
                     time_series: true,
                     include_weather: true,
                     include_landcover: true,
+                    start_date: startDate,
+                    end_date: endDate,
                 });
 
                 setNdviData(data);
@@ -70,7 +103,19 @@ export default function GisInterface() {
         }
 
         fetchData();
-    }, [selectedRegion]);
+    }, [selectedRegion, startDate, endDate]); // Handle date range changes from the date picker
+    const handleDateChange = (newStartDate: string, newEndDate: string) => {
+        setStartDate(newStartDate);
+        setEndDate(newEndDate);
+    };
+
+    // Handle clearing the selected region
+    const handleClearRegion = () => {
+        setSelectedRegion(null);
+        setNdviData(null);
+        setError(null);
+    };
+
     const handleRegionSelect = (region: {
         name: string;
         center: { lat: number; lng: number };
@@ -91,6 +136,8 @@ export default function GisInterface() {
                 <MapView
                     onRegionSelect={handleRegionSelect}
                     ndviTileUrl={ndviData?.ndvi_tiles?.url}
+                    userLocation={userLocation}
+                    selectedRegion={selectedRegion}
                 />
 
                 {/* Loading or error overlay */}
@@ -116,8 +163,7 @@ export default function GisInterface() {
                         </Alert>
                     </div>
                 )}
-            </div>
-
+            </div>{" "}
             {/* Data Visualization (Right Side) */}
             <div className="w-full md:w-1/2 h-1/2 md:h-full">
                 <DataVisualization
@@ -125,6 +171,10 @@ export default function GisInterface() {
                     ndviData={ndviData}
                     loading={loading}
                     error={error}
+                    startDate={startDate}
+                    endDate={endDate}
+                    onDateChange={handleDateChange}
+                    onClearRegion={handleClearRegion}
                 />
             </div>
         </div>
