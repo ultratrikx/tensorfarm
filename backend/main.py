@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException  
+from fastapi import FastAPI, HTTPException, UploadFile, File  
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List
 import ee
@@ -8,6 +9,10 @@ import logging
 import os
 import time
 from datetime import datetime
+import numpy as np
+from PIL import Image
+import io
+import matplotlib.pyplot as plt
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -600,6 +605,47 @@ def get_landcover_data(region, year=2021):
     except Exception as e:
         logger.error(f"Error fetching climate data: {e}")
         return {"error": str(e)}
+
+@app.post("/api/process-ndvi")
+async def process_ndvi_image(file: UploadFile = File(...)):
+    """
+    Process a raw NDVI image (red channel) and return a colormapped version.
+    The input should be a single-channel image where the red channel contains NDVI values (0-255).
+    """
+    try:
+        # Read the uploaded image
+        contents = await file.read()
+        img = Image.open(io.BytesIO(contents))
+        
+        # Convert to numpy array and extract red channel (NDVI data)
+        img_array = np.array(img)
+        if len(img_array.shape) == 3:
+            ndvi_raw = img_array[:, :, 0]  # Red channel
+        else:
+            ndvi_raw = img_array
+        
+        # Normalize NDVI values from 0-255 to -1 to 1 range
+        ndvi_normalized = (ndvi_raw.astype(float) / 255.0) * 2 - 1
+        
+        # Create a colormap
+        plt.ioff()  # Turn off interactive mode
+        fig = plt.figure(figsize=(10, 10))
+        plt.imshow(ndvi_normalized, cmap='RdYlGn', vmin=-1, vmax=1)
+        plt.colorbar(label='NDVI')
+        plt.axis('off')
+        
+        # Save the colormapped image to a byte stream
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
+        plt.close(fig)
+        buf.seek(0)
+        
+        # Return the processed image as a streaming response
+        return StreamingResponse(buf, media_type="image/png")
+        
+    except Exception as e:
+        logging.error(f"Error processing NDVI image: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

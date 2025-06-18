@@ -1,4 +1,5 @@
 import "./globals.css";
+import Navigation from "../components/Navigation";
 
 export const metadata = {
     title: "TensorFarm GIS Interface",
@@ -26,7 +27,10 @@ export default function RootLayout({
                     crossOrigin=""
                 />
             </head>
-            <body>{children}</body>
+            <body>
+                <Navigation />
+                {children}
+            </body>
         </html>
     );
 }
