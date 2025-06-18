@@ -57,9 +57,7 @@ export default function GisInterface() {
     const threeMonthsAgo = subMonths(today, 3);
 
     // Date range state for time series (using proper ISO string format)
-    const [startDate] = useState<string>(
-        format(threeMonthsAgo, "yyyy-MM-dd")
-    );
+    const [startDate] = useState<string>(format(threeMonthsAgo, "yyyy-MM-dd"));
     const [endDate] = useState<string>(format(today, "yyyy-MM-dd"));
     const [userLocation, setUserLocation] = useState<{
         lat: number;
@@ -210,8 +208,8 @@ export default function GisInterface() {
                         showTimeline={timelineData.length > 0}
                     />
                 </div>{" "}
-                {/* Side Panel */}
-                <div className="w-1/2 h-full bg-background border-l overflow-hidden flex flex-col relative">
+                {/* Side Panel */}{" "}
+                <div className="w-1/2 h-screen overflow-hidden bg-background border-l relative">
                     {loading && (
                         <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center">
                             <div className="text-center space-y-4 bg-background/90 p-6 rounded-lg shadow-lg border">
@@ -225,11 +223,8 @@ export default function GisInterface() {
                             </div>
                         </div>
                     )}
-                    <Tabs
-                        defaultValue="info"
-                        className="flex-1 flex flex-col h-full"
-                    >
-                        <div className="shrink-0 p-4 border-b">
+                    <Tabs defaultValue="info" className="h-full flex flex-col">
+                        <div className="shrink-0 border-b">
                             <TabsList className="w-full">
                                 <TabsTrigger value="info" className="flex-1">
                                     Information
@@ -242,11 +237,8 @@ export default function GisInterface() {
                                 </TabsTrigger>
                             </TabsList>
                         </div>
-                        <div className="flex-1 overflow-hidden">
-                            <TabsContent
-                                value="info"
-                                className="h-full p-4 overflow-y-auto"
-                            >
+                        <div className="flex-1 overflow-y-auto">
+                            <TabsContent value="info" className="p-6 space-y-6">
                                 <div className="space-y-4">
                                     <Card>
                                         <CardHeader>
@@ -405,11 +397,10 @@ export default function GisInterface() {
                                         </Card>
                                     )}
                                 </div>
-                            </TabsContent>
-
+                            </TabsContent>{" "}
                             <TabsContent
                                 value="analysis"
-                                className="h-full p-4 overflow-y-auto"
+                                className="p-6 space-y-6"
                             >
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                     {ndviData?.landcover && (
@@ -482,41 +473,40 @@ export default function GisInterface() {
                                     {selectedRegion &&
                                         timelineData.length > 0 && (
                                             <>
+                                                {" "}
                                                 <Card className="lg:col-span-2">
-                                                    <CardHeader>
+                                                    <CardHeader className="pb-2">
                                                         <CardTitle>
                                                             NDVI Trends
                                                         </CardTitle>
                                                     </CardHeader>
-                                                    <CardContent className="h-[250px]">
+                                                    <CardContent className="h-[160px] py-2">
                                                         <DataVisualization
                                                             data={timelineData}
                                                             type="ndvi"
                                                         />
                                                     </CardContent>
                                                 </Card>
-
                                                 <Card>
-                                                    <CardHeader>
+                                                    <CardHeader className="pb-2">
                                                         <CardTitle>
                                                             Temperature Trends
                                                         </CardTitle>
                                                     </CardHeader>
-                                                    <CardContent className="h-[250px]">
+                                                    <CardContent className="h-[180px]">
                                                         <DataVisualization
                                                             data={timelineData}
                                                             type="temperature"
                                                         />
                                                     </CardContent>
                                                 </Card>
-
                                                 <Card>
-                                                    <CardHeader>
+                                                    <CardHeader className="pb-2">
                                                         <CardTitle>
                                                             Precipitation Trends
                                                         </CardTitle>
                                                     </CardHeader>
-                                                    <CardContent className="h-[250px]">
+                                                    <CardContent className="h-[180px]">
                                                         <DataVisualization
                                                             data={timelineData}
                                                             type="precipitation"
