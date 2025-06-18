@@ -440,23 +440,19 @@ export default function GisInterface() {
                                                                 )}
                                                                 %
                                                             </span>
-                                                        </div>
+                                                        </div>{" "}
                                                         <Progress
                                                             value={
                                                                 data.percentage
                                                             }
                                                             className="h-2"
-                                                        >
-                                                            <div
-                                                                className={cn(
-                                                                    "h-full w-full absolute",
-                                                                    VEGETATION_COLORS[
-                                                                        className as keyof typeof VEGETATION_COLORS
-                                                                    ] ||
-                                                                        "bg-gray-400"
-                                                                )}
-                                                            />
-                                                        </Progress>
+                                                            indicatorClassName={cn(
+                                                                VEGETATION_COLORS[
+                                                                    className as keyof typeof VEGETATION_COLORS
+                                                                ] ||
+                                                                    "bg-gray-400"
+                                                            )}
+                                                        />
                                                         <p className="text-xs text-muted-foreground">
                                                             Area:{" "}
                                                             {data.area_hectares.toFixed(
