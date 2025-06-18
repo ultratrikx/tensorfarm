@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw/dist/leaflet.draw.css";
 import { motion } from "framer-motion";
 import TimelineBar from "./TimelineBar";
 import { TimelineData } from "../../lib/timeline-store";
+import { Button } from "../ui/button/index";
 
 // Import the draw plugin
 import "leaflet-draw";
@@ -37,10 +38,59 @@ export default function MapView({
     timelineData = [],
     onTimelineChange,
     showTimeline = false,
-}: MapViewProps) {
-    const [currentNdviUrl, setCurrentNdviUrl] = useState<string | undefined>(
+}: MapViewProps) {    const [currentNdviUrl, setCurrentNdviUrl] = useState<string | undefined>(
         ndviTileUrl
     );
+      // Store pending polygon data that needs user confirmation
+    const [pendingPolygon, setPendingPolygon] = useState<{
+        name: string;
+        center: { lat: number; lng: number };
+        coordinates: Array<[number, number]>;
+    } | null>(null);// Handle confirming the polygon selection
+    const handleConfirmSelection = () => {
+        if (pendingPolygon) {
+            onRegionSelect({
+                name: pendingPolygon.name,
+                center: pendingPolygon.center,
+                coordinates: pendingPolygon.coordinates,
+            });
+        }
+    };    // Handle canceling the polygon selection
+    const handleCancelSelection = () => {
+        if (pendingPolygonLayerRef.current && drawnItemsRef.current) {
+            drawnItemsRef.current.removeLayer(pendingPolygonLayerRef.current);
+            pendingPolygonLayerRef.current = null;
+            setPendingPolygon(null);
+            isUserDrawnRef.current = false;
+        }
+    };    // Redraw the pending polygon whenever needed
+    const redrawPendingPolygon = useCallback(() => {
+        if (pendingPolygon && drawnItemsRef.current && mapRef.current) {
+            // Remove existing layer if it exists
+            if (pendingPolygonLayerRef.current && mapRef.current.hasLayer(pendingPolygonLayerRef.current)) {
+                drawnItemsRef.current.removeLayer(pendingPolygonLayerRef.current);
+            }
+            
+            // Recreate the polygon
+            const latLngs = pendingPolygon.coordinates.map(
+                ([lat, lng]) => new L.LatLng(lat, lng)
+            );
+            const newPolygon = new L.Polygon(latLngs, {
+                color: "#ff0000",
+                weight: 4,
+                opacity: 1,
+                fillOpacity: 0.3,
+            });
+            
+            // Add to map
+            drawnItemsRef.current.addLayer(newPolygon);
+            drawnItemsRef.current.bringToFront();
+            newPolygon.bindPopup(`${pendingPolygon.name}<br/><small>Click "Confirm Selection" to fetch data</small>`);
+            
+            // Store the layer reference
+            pendingPolygonLayerRef.current = newPolygon;
+        }
+    }, [pendingPolygon]);
 
     // Handle timeline changes
     const handleTimelineChange = (data: TimelineData, index: number) => {
@@ -51,13 +101,12 @@ export default function MapView({
         if (onTimelineChange) {
             onTimelineChange(data, index);
         }
-    };
-
-    const mapRef = useRef<L.Map | null>(null);
+    };    const mapRef = useRef<L.Map | null>(null);
     const mapContainerRef = useRef<HTMLDivElement>(null);
     const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
     const ndviLayerRef = useRef<L.TileLayer | null>(null);
-    const currentPolygonRef = useRef<L.Polygon | null>(null);
+    const isUserDrawnRef = useRef<boolean>(false);
+    const pendingPolygonLayerRef = useRef<L.Polygon | null>(null);
     useEffect(() => {
         // Make sure Leaflet markers work properly in Next.js
         // @ts-expect-error - This is a known issue with Leaflet in Next.js
@@ -109,7 +158,7 @@ export default function MapView({
                                 "<strong>Error:</strong> Polygon edges cannot cross!",
                         },
                         shapeOptions: {
-                            color: "#ff0000", // Red color for better visibility over NDVI
+                            color: "#ff0000",
                             weight: 4,
                             opacity: 1,
                             fillOpacity: 0.3,
@@ -121,92 +170,70 @@ export default function MapView({
                     remove: true,
                 },
             });
-            mapRef.current.addControl(drawControl); // Event handler for when a polygon is created
+            mapRef.current.addControl(drawControl);            // Store polygon data for user confirmation instead of immediately triggering onRegionSelect
             mapRef.current.on(L.Draw.Event.CREATED, (e: L.LeafletEvent) => {
                 const event = e as unknown as { layer: L.Polygon };
                 const layer = event.layer;
 
-                // Add the layer to the feature group
-                if (drawnItemsRef.current) {
-                    // Clear any existing layers first (only one polygon at a time)
-                    drawnItemsRef.current.clearLayers();
+                // Add the layer to the drawn items group
+                drawnItemsRef.current!.addLayer(layer);
+                isUserDrawnRef.current = true;
+                
+                // Store the layer reference
+                pendingPolygonLayerRef.current = layer;
 
-                    // Store reference to current polygon
-                    currentPolygonRef.current = layer; // Add the new layer
-                    drawnItemsRef.current.addLayer(layer);
+                // Extract coordinates and store for confirmation
+                const latLngs = layer.getLatLngs()[0] as L.LatLng[];
+                const coordinates = latLngs.map(
+                    (ll) => [ll.lat, ll.lng] as [number, number]
+                );
+                const bounds = layer.getBounds();
+                const center = bounds.getCenter();
+                const name = `Selected Region (${center.lat.toFixed(
+                    4
+                )}, ${center.lng.toFixed(4)})`;
 
-                    // Ensure the drawn polygon is always on top
-                    drawnItemsRef.current.bringToFront();
+                // Add popup with confirmation message
+                layer.bindPopup(`${name}<br/><small>Click "Confirm Selection" to fetch data</small>`).openPopup();
 
-                    // Get the polygon coordinates
-                    const latLngs = layer.getLatLngs()[0] as L.LatLng[];
-                    const coordinates = latLngs.map(
-                        (ll) => [ll.lat, ll.lng] as [number, number]
-                    );
-
-                    // Calculate center of polygon
-                    const bounds = layer.getBounds();
-                    const center = bounds.getCenter();
-
-                    // Generate a name based on the location
-                    const name = `Selected Region (${center.lat.toFixed(
-                        4
-                    )}, ${center.lng.toFixed(4)})`;
-
-                    // Add the region data to parent component
-                    onRegionSelect({
-                        name,
-                        center: { lat: center.lat, lng: center.lng },
-                        coordinates,
-                    });
-
-                    // Add a popup with the area name
-                    layer.bindPopup(name).openPopup();
-                }
-            }); // Event handler for when a polygon is edited
-            mapRef.current.on(L.Draw.Event.EDITED, (e: L.LeafletEvent) => {
+                // Store the pending polygon data
+                setPendingPolygon({
+                    name,
+                    center: { lat: center.lat, lng: center.lng },
+                    coordinates
+                });
+            });            mapRef.current.on(L.Draw.Event.EDITED, (e: L.LeafletEvent) => {
                 const event = e as unknown as { layers: L.LayerGroup };
-                const layers = event.layers;
-                layers.eachLayer((layer) => {
-                    // Cast layer to Polygon
+                event.layers.eachLayer((layer) => {
                     const polygon = layer as unknown as L.Polygon;
+                    isUserDrawnRef.current = true;
+                    
+                    // Store the layer reference
+                    pendingPolygonLayerRef.current = polygon;
 
-                    // Update the current polygon reference
-                    currentPolygonRef.current = polygon;
-
-                    // Get the updated polygon coordinates
                     const latLngs = polygon.getLatLngs()[0] as L.LatLng[];
                     const coordinates = latLngs.map(
                         (ll) => [ll.lat, ll.lng] as [number, number]
                     );
-
-                    // Calculate center of polygon
                     const bounds = polygon.getBounds();
                     const center = bounds.getCenter();
-                    // Generate a name based on the location
                     const name = `Selected Region (${center.lat.toFixed(
                         4
-                    )}, ${center.lng.toFixed(4)})`; // Pass the region data to parent component
-                    onRegionSelect({
+                    )}, ${center.lng.toFixed(4)})`;
+
+                    polygon.bindPopup(`${name}<br/><small>Click "Confirm Selection" to fetch data</small>`).openPopup();
+
+                    // Update pending polygon data
+                    setPendingPolygon({
                         name,
                         center: { lat: center.lat, lng: center.lng },
-                        coordinates,
+                        coordinates
                     });
-
-                    // Update popup
-                    polygon.bindPopup(name).openPopup();
-
-                    // Ensure the drawn polygon stays on top
-                    if (drawnItemsRef.current) {
-                        drawnItemsRef.current.bringToFront();
-                    }
                 });
-            }); // Event handler for when a polygon is deleted
-            mapRef.current.on(L.Draw.Event.DELETED, () => {
-                // Clear the current polygon reference
-                currentPolygonRef.current = null;
-
-                // Clear the selected region when deleted
+            });            mapRef.current.on(L.Draw.Event.DELETED, () => {
+                isUserDrawnRef.current = false;
+                pendingPolygonLayerRef.current = null;
+                setPendingPolygon(null);
                 onRegionSelect({
                     name: "",
                     center: { lat: 0, lng: 0 },
@@ -238,7 +265,7 @@ export default function MapView({
                 mapRef.current = null;
             }
         };
-    }, [onRegionSelect, userLocation]); // Add or update NDVI tile layer when ndviTileUrl changes
+    }, [onRegionSelect, userLocation]);    // Add or update NDVI tile layer when ndviTileUrl changes
     useEffect(() => {
         if (!mapRef.current) return;
 
@@ -246,7 +273,9 @@ export default function MapView({
         if (ndviLayerRef.current) {
             mapRef.current.removeLayer(ndviLayerRef.current);
             ndviLayerRef.current = null;
-        } // Add new NDVI layer if URL is provided
+        }
+        
+        // Add new NDVI layer if URL is provided
         if (currentNdviUrl) {
             ndviLayerRef.current = L.tileLayer(currentNdviUrl, {
                 attribution: "Google Earth Engine | TensorFarm",
@@ -262,51 +291,53 @@ export default function MapView({
             ) {
                 drawnItemsRef.current.bringToFront();
             }
+            
+            // Redraw pending polygon after NDVI layer is added
+            redrawPendingPolygon();
         }
-    }, [currentNdviUrl]);
+    }, [currentNdviUrl, redrawPendingPolygon]);
 
     // Update currentNdviUrl when ndviTileUrl prop changes (for initial load)
     useEffect(() => {
         if (ndviTileUrl && !timelineData.length) {
             setCurrentNdviUrl(ndviTileUrl);
-        }
-    }, [ndviTileUrl, timelineData.length]); // Display selected region on the map (only when there's no current polygon from drawing)
+        }    }, [ndviTileUrl, timelineData.length]);// Display selected region on the map or handle region clearing
     useEffect(() => {
         if (!mapRef.current || !drawnItemsRef.current) return;
 
-        // Only restore the polygon if we don't already have one from drawing
-        // This prevents conflicts with the drawing tools
+        // Don't interfere with user-drawn polygons or pending polygons
+        if (isUserDrawnRef.current || pendingPolygon) {
+            return;
+        }
+
+        // Clear existing polygons
+        drawnItemsRef.current.clearLayers();
+
+        // Add polygon from external source (not user-drawn)
         if (
-            selectedRegion?.coordinates &&
-            selectedRegion.coordinates.length > 0 &&
-            !currentPolygonRef.current
+            selectedRegion &&
+            selectedRegion.coordinates &&
+            selectedRegion.coordinates.length > 0
         ) {
-            // Convert to Leaflet LatLngs
             const latLngs = selectedRegion.coordinates.map(
                 ([lat, lng]) => new L.LatLng(lat, lng)
-            ); // Create a polygon and add it to the map
+            );
             const polygon = new L.Polygon(latLngs, {
-                color: "#ff0000", // Red color for better visibility over NDVI
+                color: "#ff0000",
                 weight: 4,
                 opacity: 1,
                 fillOpacity: 0.3,
-            }); // Store reference to current polygon
-            currentPolygonRef.current = polygon;
-
-            // Add to drawn items layer
+                fillColor: "#ff0000",
+            });
             drawnItemsRef.current.addLayer(polygon);
-
-            // Ensure the drawn polygon is always on top
             drawnItemsRef.current.bringToFront();
-
-            // Add a popup with the region name
             polygon.bindPopup(selectedRegion.name);
-
-            // Fit map to polygon bounds
-            mapRef.current.fitBounds(polygon.getBounds());
+        } else if (selectedRegion?.name === "") {
+            // Clear user-drawn flag when region is explicitly cleared
+            isUserDrawnRef.current = false;
+            setPendingPolygon(null);
         }
-    }, [selectedRegion]);
-    return (
+    }, [selectedRegion, pendingPolygon]);return (
         <div className="relative h-full w-full">
             <motion.div
                 ref={mapContainerRef}
@@ -315,6 +346,33 @@ export default function MapView({
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.5 }}
             />
+
+            {/* Polygon Confirmation Buttons */}
+            {pendingPolygon && (
+                <div className="absolute top-4 left-4 z-50 bg-white p-3 rounded-md shadow-lg">
+                    <p className="text-sm mb-3">
+                        <strong>Region Selected</strong>
+                        <br />
+                        {pendingPolygon.name}
+                    </p>
+                    <div className="flex gap-2">
+                        <Button
+                            onClick={handleConfirmSelection}
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700"
+                        >
+                            Confirm Selection
+                        </Button>
+                        <Button
+                            onClick={handleCancelSelection}
+                            variant="outline"
+                            size="sm"
+                        >
+                            Cancel
+                        </Button>
+                    </div>
+                </div>
+            )}
 
             {/* Timeline Bar */}
             {showTimeline && timelineData.length > 0 && (

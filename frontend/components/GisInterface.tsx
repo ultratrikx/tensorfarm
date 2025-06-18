@@ -134,11 +134,14 @@ export default function GisInterface() {
     const handleDateChange = (newStartDate: string, newEndDate: string) => {
         setStartDate(newStartDate);
         setEndDate(newEndDate);
-    };
-
-    // Handle clearing the selected region
+    }; // Handle clearing the selected region
     const handleClearRegion = () => {
-        setSelectedRegion(null);
+        // Set to an empty region object to signal clearing
+        setSelectedRegion({
+            name: "",
+            center: { lat: 0, lng: 0 },
+            coordinates: [],
+        });
         setNdviData(null);
         setError(null);
     };
