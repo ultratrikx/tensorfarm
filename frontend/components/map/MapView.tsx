@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw/dist/leaflet.draw.css";
+import { motion } from "framer-motion";
+import TimelineBar from "./TimelineBar";
+import { TimelineData } from "../../lib/timeline-store";
 
 // Import the draw plugin
 import "leaflet-draw";
@@ -21,6 +24,9 @@ type MapViewProps = {
         center: { lat: number; lng: number };
         coordinates: Array<[number, number]>;
     } | null;
+    timelineData?: TimelineData[];
+    onTimelineChange?: (data: TimelineData, index: number) => void;
+    showTimeline?: boolean;
 };
 
 export default function MapView({
@@ -28,7 +34,25 @@ export default function MapView({
     ndviTileUrl,
     userLocation,
     selectedRegion,
+    timelineData = [],
+    onTimelineChange,
+    showTimeline = false,
 }: MapViewProps) {
+    const [currentNdviUrl, setCurrentNdviUrl] = useState<string | undefined>(
+        ndviTileUrl
+    );
+
+    // Handle timeline changes
+    const handleTimelineChange = (data: TimelineData, index: number) => {
+        // Update the NDVI tile URL for the selected timestamp
+        setCurrentNdviUrl(data.url);
+
+        // Notify parent component
+        if (onTimelineChange) {
+            onTimelineChange(data, index);
+        }
+    };
+
     const mapRef = useRef<L.Map | null>(null);
     const mapContainerRef = useRef<HTMLDivElement>(null);
     const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
@@ -214,9 +238,7 @@ export default function MapView({
                 mapRef.current = null;
             }
         };
-    }, [onRegionSelect, userLocation]);
-
-    // Add or update NDVI tile layer when ndviTileUrl changes
+    }, [onRegionSelect, userLocation]); // Add or update NDVI tile layer when ndviTileUrl changes
     useEffect(() => {
         if (!mapRef.current) return;
 
@@ -225,8 +247,8 @@ export default function MapView({
             mapRef.current.removeLayer(ndviLayerRef.current);
             ndviLayerRef.current = null;
         } // Add new NDVI layer if URL is provided
-        if (ndviTileUrl) {
-            ndviLayerRef.current = L.tileLayer(ndviTileUrl, {
+        if (currentNdviUrl) {
+            ndviLayerRef.current = L.tileLayer(currentNdviUrl, {
                 attribution: "Google Earth Engine | TensorFarm",
                 opacity: 0.7,
                 maxZoom: 19,
@@ -241,7 +263,14 @@ export default function MapView({
                 drawnItemsRef.current.bringToFront();
             }
         }
-    }, [ndviTileUrl]); // Display selected region on the map (only when there's no current polygon from drawing)
+    }, [currentNdviUrl]);
+
+    // Update currentNdviUrl when ndviTileUrl prop changes (for initial load)
+    useEffect(() => {
+        if (ndviTileUrl && !timelineData.length) {
+            setCurrentNdviUrl(ndviTileUrl);
+        }
+    }, [ndviTileUrl, timelineData.length]); // Display selected region on the map (only when there's no current polygon from drawing)
     useEffect(() => {
         if (!mapRef.current || !drawnItemsRef.current) return;
 
@@ -277,10 +306,24 @@ export default function MapView({
             mapRef.current.fitBounds(polygon.getBounds());
         }
     }, [selectedRegion]);
-
     return (
         <div className="relative h-full w-full">
-            <div ref={mapContainerRef} className="h-full w-full z-10" />
+            <motion.div
+                ref={mapContainerRef}
+                className="h-full w-full z-10"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5 }}
+            />
+
+            {/* Timeline Bar */}
+            {showTimeline && timelineData.length > 0 && (
+                <TimelineBar
+                    timelineData={timelineData}
+                    onTimelineChange={handleTimelineChange}
+                    position="bottom"
+                />
+            )}
         </div>
     );
 }

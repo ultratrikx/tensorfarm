@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
 import DataVisualization from "../components/charts/DataVisualization";
 import {
@@ -12,6 +12,7 @@ import { Alert, AlertDescription } from "../components/ui/alert";
 import { Button } from "../components/ui/button";
 import { Loader2 } from "lucide-react";
 import { format, subMonths } from "date-fns";
+import { TimelineData } from "../lib/timeline-store";
 
 // Import MapView dynamically with no SSR to avoid Leaflet issues
 const MapView = dynamic(() => import("../components/map/MapView"), {
@@ -29,10 +30,10 @@ export default function GisInterface() {
         center: { lat: number; lng: number };
         coordinates: Array<[number, number]>;
     } | null>(null);
-
     const [ndviData, setNdviData] = useState<NdviDataResponse | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [currentTimelineIndex, setCurrentTimelineIndex] = useState(0);
 
     // Set up default date range (last 3 months to current date)
     const today = new Date();
@@ -47,6 +48,26 @@ export default function GisInterface() {
         lat: number;
         lng: number;
     } | null>(null);
+
+    // Create timeline data from NDVI response
+    const timelineData = useMemo<TimelineData[]>(() => {
+        if (!ndviData?.time_series?.data) return [];
+
+        return ndviData.time_series.data.map((item) => {
+            // Find corresponding weather data for the same date
+            const weatherData = ndviData.weather?.data.find(
+                (weather) => weather.date === item.date
+            );
+
+            return {
+                date: item.date,
+                ndvi: item.ndvi,
+                url: item.url,
+                temperature: weatherData?.temperature_celsius,
+                precipitation: weatherData?.precipitation_mm,
+            };
+        });
+    }, [ndviData]);
 
     // Get user location on component mount
     useEffect(() => {
@@ -103,7 +124,13 @@ export default function GisInterface() {
         }
 
         fetchData();
-    }, [selectedRegion, startDate, endDate]); // Handle date range changes from the date picker
+    }, [selectedRegion, startDate, endDate]); // Handle timeline changes from the timeline bar
+    const handleTimelineChange = (data: TimelineData, index: number) => {
+        setCurrentTimelineIndex(index);
+        // The MapView will handle updating the NDVI tile automatically
+    };
+
+    // Handle date range changes from the date picker
     const handleDateChange = (newStartDate: string, newEndDate: string) => {
         setStartDate(newStartDate);
         setEndDate(newEndDate);
@@ -131,13 +158,16 @@ export default function GisInterface() {
 
     return (
         <div className="flex flex-col md:flex-row h-screen w-full">
-            {/* Map View (Left Side) */}
+            {/* Map View (Left Side) */}{" "}
             <div className="w-full md:w-1/2 h-1/2 md:h-full border-r border-border">
                 <MapView
                     onRegionSelect={handleRegionSelect}
                     ndviTileUrl={ndviData?.ndvi_tiles?.url}
                     userLocation={userLocation}
                     selectedRegion={selectedRegion}
+                    timelineData={timelineData}
+                    onTimelineChange={handleTimelineChange}
+                    showTimeline={timelineData.length > 1}
                 />
 
                 {/* Loading or error overlay */}
@@ -164,7 +194,7 @@ export default function GisInterface() {
                     </div>
                 )}
             </div>{" "}
-            {/* Data Visualization (Right Side) */}
+            {/* Data Visualization (Right Side) */}{" "}
             <div className="w-full md:w-1/2 h-1/2 md:h-full">
                 <DataVisualization
                     selectedRegion={selectedRegion}
@@ -173,6 +203,7 @@ export default function GisInterface() {
                     error={error}
                     startDate={startDate}
                     endDate={endDate}
+                    currentTimelineIndex={currentTimelineIndex}
                     onDateChange={handleDateChange}
                     onClearRegion={handleClearRegion}
                 />

@@ -51,6 +51,7 @@ type DataVisualizationProps = {
     error: string | null;
     startDate: string;
     endDate: string;
+    currentTimelineIndex?: number;
     onDateChange: (startDate: string, endDate: string) => void;
     onClearRegion?: () => void;
 };
@@ -62,6 +63,7 @@ export default function DataVisualization({
     error,
     startDate,
     endDate,
+    currentTimelineIndex = 0,
     onDateChange,
     onClearRegion,
 }: DataVisualizationProps) {
@@ -161,8 +163,116 @@ export default function DataVisualization({
                                 setDateRange={handleDateRangeChange}
                                 className="w-full"
                             />
-                        </CardContent>
+                        </CardContent>{" "}
                     </Card>
+
+                    {/* Current Timeline Data */}
+                    {selectedRegion &&
+                        ndviData?.time_series?.data &&
+                        ndviData.time_series.data.length > 0 && (
+                            <Card className="border-primary/20 bg-primary/5">
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
+                                        Current Timeline Selection
+                                    </CardTitle>
+                                    <CardDescription>
+                                        Data for{" "}
+                                        {ndviData.time_series.data[
+                                            currentTimelineIndex
+                                        ]
+                                            ? format(
+                                                  new Date(
+                                                      ndviData.time_series.data[
+                                                          currentTimelineIndex
+                                                      ].date
+                                                  ),
+                                                  "MMMM dd, yyyy"
+                                              )
+                                            : "N/A"}
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {ndviData.time_series.data[
+                                            currentTimelineIndex
+                                        ] && (
+                                            <div className="text-center p-3 bg-background/50 rounded-lg">
+                                                <div className="text-2xl font-bold text-green-600">
+                                                    {ndviData.time_series.data[
+                                                        currentTimelineIndex
+                                                    ].ndvi.toFixed(3)}
+                                                </div>
+                                                <div className="text-sm text-muted-foreground">
+                                                    NDVI
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {ndviData.weather?.data.find(
+                                            (w) =>
+                                                w.date ===
+                                                ndviData.time_series?.data[
+                                                    currentTimelineIndex
+                                                ]?.date
+                                        )?.temperature_celsius !==
+                                            undefined && (
+                                            <div className="text-center p-3 bg-background/50 rounded-lg">
+                                                <div className="text-2xl font-bold text-red-500">
+                                                    {ndviData.weather.data
+                                                        .find(
+                                                            (w) =>
+                                                                w.date ===
+                                                                ndviData
+                                                                    .time_series
+                                                                    ?.data[
+                                                                    currentTimelineIndex
+                                                                ]?.date
+                                                        )
+                                                        ?.temperature_celsius?.toFixed(
+                                                            1
+                                                        )}
+                                                    °C
+                                                </div>
+                                                <div className="text-sm text-muted-foreground">
+                                                    Temperature
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {ndviData.weather?.data.find(
+                                            (w) =>
+                                                w.date ===
+                                                ndviData.time_series?.data[
+                                                    currentTimelineIndex
+                                                ]?.date
+                                        )?.precipitation_mm !== undefined && (
+                                            <div className="text-center p-3 bg-background/50 rounded-lg">
+                                                <div className="text-2xl font-bold text-blue-500">
+                                                    {ndviData.weather.data
+                                                        .find(
+                                                            (w) =>
+                                                                w.date ===
+                                                                ndviData
+                                                                    .time_series
+                                                                    ?.data[
+                                                                    currentTimelineIndex
+                                                                ]?.date
+                                                        )
+                                                        ?.precipitation_mm?.toFixed(
+                                                            1
+                                                        )}
+                                                    mm
+                                                </div>
+                                                <div className="text-sm text-muted-foreground">
+                                                    Precipitation
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
 
                     {error && (
                         <Alert variant="destructive">
