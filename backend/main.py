@@ -60,6 +60,9 @@ class PolygonData(BaseModel):
     start_date: str = "2024-11-01"  # Default start date for time series
     end_date: str = "2025-05-01"  # Default end date for time series
     time_series: bool = False  # Whether to return time series data
+    include_weather: bool = False  # Whether to include weather data (temperature, precipitation)
+    include_topography: bool = False  # Whether to include topographical data (elevation, slope)
+    include_landcover: bool = False  # Whether to include land cover data (land cover classes, vegetation stats)
 
 @app.get("/")
 def read_root():
@@ -110,10 +113,9 @@ def get_ndvi_tiles(data: PolygonData):
         
         # Get dates from request parameters or use defaults
         start_date = ee.Date(data.start_date)
-        end_date = ee.Date(data.end_date)
-        
-        # Log the parameters being used
+        end_date = ee.Date(data.end_date)        # Log the parameters being used
         logger.info(f"Processing request with: satellite={data.satellite_source}, start_date={data.start_date}, end_date={data.end_date}, time_series={data.time_series}")
+        logger.info(f"Additional data requested: weather={data.include_weather}, topography={data.include_topography}, landcover={data.include_landcover}")
         
         # Select satellite collection and bands based on source
         if data.satellite_source.lower() == "landsat-8":
@@ -253,60 +255,26 @@ def get_ndvi_tiles(data: PolygonData):
                             })
                     except Exception as e:
                         logger.warning(f"Could not generate tiles for date {i}: {e}")
-                  # Create a time series visualization if there are at least 2 dates
-                if len(time_series_data) >= 3:
-                    try:
-                        # Sort the data for proper time progression
-                        sorted_dates = sorted(response["time_series"]["data"], key=lambda x: x["date"])
-                        
-                        # Use specific indices for beginning, middle, and end
-                        first_idx = 0
-                        middle_idx = len(sorted_dates) // 2
-                        last_idx = len(sorted_dates) - 1
-                        
-                        # Find the images corresponding to these dates
-                        first_date = sorted_dates[first_idx]["date"]
-                        middle_date = sorted_dates[middle_idx]["date"]
-                        last_date = sorted_dates[last_idx]["date"]
-                        
-                        # Get the first, middle, and last images by finding them in the images_list
-                        first_image = None
-                        middle_image = None
-                        last_image = None
-                        
-                        for i in range(size):
-                            image = ee.Image(images_list.get(i))
-                            date = ee.Date(image.get('system:time_start')).format('YYYY-MM-dd').getInfo()
-                            
-                            if date == first_date:
-                                first_image = image
-                            elif date == middle_date:
-                                middle_image = image
-                            elif date == last_date:
-                                last_image = image
-                        
-                        # Create RGB composite if we found all necessary images
-                        if first_image and middle_image and last_image:
-                            # Create RGB composite (R = first date, G = middle date, B = last date)
-                            rgb_vis = ee.Image.rgb(
-                                first_image.select('NDVI'),
-                                middle_image.select('NDVI'),
-                                last_image.select('NDVI')
-                            )
-                            
-                            # Add RGB visualization to response
-                            rgb_map_id = rgb_vis.getMapId({
-                                'min': 0,
-                                'max': 1
-                            })
-                            
-                            response["time_series"]["rgb_visualization"] = {
-                                "url": rgb_map_id['tile_fetcher'].url_format,
-                                "dates": [first_date, middle_date, last_date]
-                            }
-                    except Exception as e:
-                        logger.error(f"Error generating RGB visualization: {e}")
-                        # Continue without RGB visualization
+                
+                # Add additional data if requested
+                # Weather data
+                if data.include_weather:
+                    logger.info("Fetching weather data...")
+                    weather_data = get_weather_data(ee_polygon, start_date, end_date)
+                    response["weather"] = weather_data
+                
+                # Topographical data
+                if data.include_topography:
+                    logger.info("Fetching topographical data...")
+                    topo_data = get_topography_data(ee_polygon)
+                    response["topography"] = topo_data
+                  # Climate data
+                if data.include_landcover:
+                    logger.info("Fetching land cover data...")
+                    # Use the most recent complete year for land cover data
+                    current_year = datetime.now().year - 1  # Previous year to ensure complete data
+                    landcover_data = get_landcover_data(ee_polygon, year=current_year)
+                    response["landcover"] = landcover_data
             except Exception as e:
                 logger.error(f"Error generating time series data: {e}")
                 response["time_series"] = {"error": str(e)}
@@ -316,6 +284,322 @@ def get_ndvi_tiles(data: PolygonData):
     except Exception as e:
         logger.error(f"Error processing request: {e}")
         raise HTTPException(status_code=500, detail=f"Error processing NDVI data: {str(e)}")
+
+def get_weather_data(region, start_date, end_date):
+    """
+    Fetch weather data (temperature and precipitation) for a region over a time period.
+    
+    Args:
+        region (ee.Geometry): The region of interest
+        start_date (ee.Date): Start date for data collection
+        end_date (ee.Date): End date for data collection
+        
+    Returns:
+        dict: Dictionary containing weather time series data
+    """
+    try:
+        # ERA5 reanalysis dataset for temperature (2m air temperature)
+        era5_temperature = ee.ImageCollection("ECMWF/ERA5/DAILY") \
+            .filterDate(start_date, end_date) \
+            .select('mean_2m_air_temperature')  # Kelvin
+        
+        # CHIRPS dataset for precipitation
+        chirps_precipitation = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY") \
+            .filterDate(start_date, end_date) \
+            .select('precipitation')  # mm/day
+        
+        # Get the dates in the collection
+        temperature_dates = era5_temperature.aggregate_array('system:time_start')
+        precipitation_dates = chirps_precipitation.aggregate_array('system:time_start')
+        
+        # Function to extract temperature for a date
+        def get_temperature_for_date(date):
+            date_ee = ee.Date(date)
+            image = era5_temperature.filterDate(date_ee, date_ee.advance(1, 'day')).first()
+            if image is None:
+                return None
+                
+            # Convert Kelvin to Celsius
+            temperature_image = image.subtract(273.15)
+            
+            # Get mean temperature for the region
+            mean_temp = temperature_image.reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=region,
+                scale=27830,  # ERA5 resolution
+                maxPixels=1e9
+            ).get('mean_2m_air_temperature')
+            
+            # Format date
+            formatted_date = date_ee.format('YYYY-MM-dd').getInfo()
+            
+            return {
+                "date": formatted_date,
+                "temperature_celsius": mean_temp.getInfo()
+            }
+        
+        # Function to extract precipitation for a date
+        def get_precipitation_for_date(date):
+            date_ee = ee.Date(date)
+            image = chirps_precipitation.filterDate(date_ee, date_ee.advance(1, 'day')).first()
+            if image is None:
+                return None
+                
+            # Get mean precipitation for the region (mm/day)
+            mean_precip = image.reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=region,
+                scale=5566,  # CHIRPS resolution ~5km
+                maxPixels=1e9
+            ).get('precipitation')
+            
+            # Format date
+            formatted_date = date_ee.format('YYYY-MM-dd').getInfo()
+            
+            return {
+                "date": formatted_date,
+                "precipitation_mm": mean_precip.getInfo()
+            }
+        
+        # Get temperature for each date (sample every 5 days to reduce computation)
+        temp_dates_list = temperature_dates.getInfo()
+        temp_dates_sampled = [temp_dates_list[i] for i in range(0, len(temp_dates_list), 5)]
+        temperature_data = [get_temperature_for_date(date) for date in temp_dates_sampled]
+        temperature_data = [item for item in temperature_data if item is not None]
+        
+        # Get precipitation for each date (sample every 5 days to reduce computation)
+        precip_dates_list = precipitation_dates.getInfo()
+        precip_dates_sampled = [precip_dates_list[i] for i in range(0, len(precip_dates_list), 5)]
+        precipitation_data = [get_precipitation_for_date(date) for date in precip_dates_sampled]
+        precipitation_data = [item for item in precipitation_data if item is not None]
+        
+        # Create combined data structure with weather data by date
+        weather_data = {}
+        
+        # Add temperature data
+        for item in temperature_data:
+            if item["date"] not in weather_data:
+                weather_data[item["date"]] = {}
+            weather_data[item["date"]]["temperature_celsius"] = item["temperature_celsius"]
+        
+        # Add precipitation data
+        for item in precipitation_data:
+            if item["date"] not in weather_data:
+                weather_data[item["date"]] = {}
+            weather_data[item["date"]]["precipitation_mm"] = item["precipitation_mm"]
+        
+        # Convert to array format
+        weather_series = []
+        for date, data in weather_data.items():
+            entry = {"date": date}
+            entry.update(data)
+            weather_series.append(entry)
+        
+        # Sort by date
+        weather_series.sort(key=lambda x: x["date"])
+        
+        return {
+            "data": weather_series,
+            "count": len(weather_series)
+        }
+    
+    except Exception as e:
+        logger.error(f"Error fetching weather data: {e}")
+        return {"error": str(e)}
+
+def get_topography_data(region):
+    """
+    Fetch topographical data (elevation, slope, aspect) for a region.
+    
+    Args:
+        region (ee.Geometry): The region of interest
+        
+    Returns:
+        dict: Dictionary containing topographical data
+    """
+    try:
+        # SRTM Digital Elevation Model
+        elevation = ee.Image("USGS/SRTMGL1_003")
+        
+        # Calculate slope and aspect
+        terrain = ee.Terrain.products(elevation)
+        
+        # Get statistics for the region
+        elevation_stats = elevation.reduceRegion(
+            reducer=ee.Reducer.minMaxMean(),
+            geometry=region,
+            scale=30,  # SRTM resolution
+            maxPixels=1e9
+        ).getInfo()
+        
+        slope_stats = terrain.select('slope').reduceRegion(
+            reducer=ee.Reducer.minMaxMean(),
+            geometry=region,
+            scale=30,
+            maxPixels=1e9
+        ).getInfo()
+        
+        aspect_stats = terrain.select('aspect').reduceRegion(
+            reducer=ee.Reducer.minMaxMean(),
+            geometry=region,
+            scale=30,
+            maxPixels=1e9
+        ).getInfo()
+        
+        # Create tile URL for elevation
+        elevation_vis_params = {
+            'min': 0,
+            'max': 3000,
+            'palette': ['006633', 'E5FFCC', '662A00', 'D8D8D8', 'F5F5F5']
+        }
+        
+        elevation_map_id = elevation.getMapId(elevation_vis_params)
+        elevation_tile_url = elevation_map_id['tile_fetcher'].url_format
+        
+        # Create tile URL for slope
+        slope_vis_params = {
+            'min': 0,
+            'max': 60,
+            'palette': ['f7fcb9', 'addd8e', '31a354']
+        }
+        
+        slope_map_id = terrain.select('slope').getMapId(slope_vis_params)
+        slope_tile_url = slope_map_id['tile_fetcher'].url_format
+        
+        return {
+            "elevation": {
+                "min_meters": elevation_stats.get('elevation_min'),
+                "max_meters": elevation_stats.get('elevation_max'),
+                "mean_meters": elevation_stats.get('elevation_mean'),
+                "tile_url": elevation_tile_url
+            },
+            "slope": {
+                "min_degrees": slope_stats.get('slope_min'),
+                "max_degrees": slope_stats.get('slope_max'),
+                "mean_degrees": slope_stats.get('slope_mean'),
+                "tile_url": slope_tile_url
+            },
+            "aspect": {
+                "min_degrees": aspect_stats.get('aspect_min'),
+                "max_degrees": aspect_stats.get('aspect_max'),
+                "mean_degrees": aspect_stats.get('aspect_mean')
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"Error fetching topography data: {e}")
+        return {"error": str(e)}
+
+def get_landcover_data(region, year=2021):
+    """
+    Fetch land cover data (land cover classes, vegetation statistics) for a region.
+    
+    Args:
+        region (ee.Geometry): The region of interest
+        year (int): Year to use for land cover data
+        
+    Returns:
+        dict: Dictionary containing land cover and vegetation data
+    """
+    try:
+        # ESA WorldCover for land cover classification
+        worldcover = ee.ImageCollection("ESA/WorldCover/v200").first()
+        
+        # MODIS Land Cover Type
+        modis_landcover = ee.ImageCollection("MODIS/061/MCD12Q1") \
+            .filter(ee.Filter.calendarRange(year, year, 'year')).first() \
+            .select('LC_Type1')
+        
+        # MODIS Vegetation Continuous Fields
+        modis_vcf = ee.ImageCollection("MODIS/061/MOD44B") \
+            .filter(ee.Filter.calendarRange(year, year, 'year')).first() \
+            .select(['Percent_Tree_Cover', 'Percent_NonTree_Vegetation', 'Percent_NonVegetated'])
+        
+        # Calculate area and percentage of each land cover class
+        area_image = ee.Image.pixelArea().divide(10000)  # Convert to hectares
+        
+        # Get total area
+        total_area = area_image.reduceRegion(
+            reducer=ee.Reducer.sum(),
+            geometry=region,
+            scale=10,  # WorldCover resolution
+            maxPixels=1e9
+        ).get('area').getInfo()
+        
+        # Define land cover classes for ESA WorldCover
+        worldcover_classes = {
+            10: "Tree cover",
+            20: "Shrubland",
+            30: "Grassland",
+            40: "Cropland",
+            50: "Built-up",
+            60: "Bare / sparse vegetation",
+            70: "Snow and ice",
+            80: "Permanent water bodies",
+            90: "Herbaceous wetland",
+            95: "Mangroves",
+            100: "Moss and lichen"
+        }
+        
+        # Calculate area for each land cover class
+        landcover_stats = {}
+        for class_value, class_name in worldcover_classes.items():
+            class_mask = worldcover.eq(class_value)
+            class_area = area_image.updateMask(class_mask).reduceRegion(
+                reducer=ee.Reducer.sum(),
+                geometry=region,
+                scale=10,
+                maxPixels=1e9
+            ).get('area')
+            
+            # Get the area value, handling None
+            area_value = 0 if class_area is None else class_area.getInfo()
+            
+            # Calculate percentage
+            percentage = 0 if total_area == 0 else (area_value / total_area) * 100;
+            
+            landcover_stats[class_name] = {
+                "area_hectares": area_value,
+                "percentage": percentage
+            }
+        
+        # Get vegetation statistics
+        veg_stats = modis_vcf.reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=region,
+            scale=250,  # MODIS VCF resolution
+            maxPixels=1e9
+        ).getInfo()
+        
+        # Create tile URL for land cover
+        worldcover_vis_params = {
+            'min': 0,
+            'max': 100,
+            'palette': [
+                '006400', '29C012', '77A112', 'FFFF4C', 'FFCCCC',
+                'FF0000', '800000', '0000FF', '0067A5', '00A580', 'A5E194'
+            ]
+        }
+        
+        landcover_map_id = worldcover.getMapId(worldcover_vis_params)
+        landcover_tile_url = landcover_map_id['tile_fetcher'].url_format
+        
+        return {
+            "land_cover": {
+                "classes": landcover_stats,
+                "dominant_class": max(landcover_stats.items(), key=lambda x: x[1]["percentage"])[0],
+                "tile_url": landcover_tile_url
+            },
+            "vegetation": {
+                "tree_cover_percent": veg_stats.get('Percent_Tree_Cover'),
+                "non_tree_vegetation_percent": veg_stats.get('Percent_NonTree_Vegetation'),
+                "non_vegetated_percent": veg_stats.get('Percent_NonVegetated')
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"Error fetching climate data: {e}")
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

@@ -158,6 +158,30 @@
                 </label>
             </div>
 
+            <div
+                style="
+                    margin-bottom: 15px;
+                    border-top: 1px solid #eee;
+                    padding-top: 10px;
+                "
+            >
+                <p style="font-weight: bold; margin-bottom: 5px">
+                    Additional Data (may slow response):
+                </p>
+                <label style="display: block; margin-bottom: 5px">
+                    <input type="checkbox" id="weatherCheckbox" />
+                    Include Weather Data
+                </label>
+                <label style="display: block; margin-bottom: 5px">
+                    <input type="checkbox" id="topoCheckbox" />
+                    Include Topography
+                </label>
+                <label style="display: block">
+                    <input type="checkbox" id="landcoverCheckbox" />
+                    Include Land Cover Data
+                </label>
+            </div>
+
             <button id="drawPolygon">Draw Polygon</button>
             <button id="fetchNDVI" disabled>Get NDVI</button>
             <button id="clearMap">Clear Map</button>
@@ -171,6 +195,19 @@
                 <h4>Time Series Data</h4>
                 <div id="timeSeriesInfo"></div>
                 <canvas id="timeSeriesChart" width="280" height="180"></canvas>
+            </div>
+
+            <div
+                id="additionalDataContainer"
+                style="
+                    display: none;
+                    margin-top: 15px;
+                    border-top: 1px solid #eee;
+                    padding-top: 10px;
+                "
+            >
+                <h4>Additional Environmental Data</h4>
+                <div id="additionalDataInfo"></div>
             </div>
         </div>
 
@@ -255,12 +292,16 @@
 
                 statusEl.textContent = "Fetching NDVI data...";
 
-                // Make a request to the backend API                // Get form values
-                const satellite = document.getElementById("satellite").value;
-                const startDate = document.getElementById("startDate").value;
+                // Make a request to the backend API                // Get form values                const satellite = document.getElementById("satellite").value;                const startDate = document.getElementById("startDate").value;
                 const endDate = document.getElementById("endDate").value;
                 const timeSeries =
                     document.getElementById("timeSeriesCheckbox").checked;
+                const includeWeather =
+                    document.getElementById("weatherCheckbox").checked;
+                const includeTopography =
+                    document.getElementById("topoCheckbox").checked;
+                const includeLandcover =
+                    document.getElementById("landcoverCheckbox").checked;
 
                 fetch("http://localhost:8000/ndvi-tiles/", {
                     method: "POST",
@@ -273,6 +314,9 @@
                         start_date: startDate,
                         end_date: endDate,
                         time_series: timeSeries,
+                        include_weather: includeWeather,
+                        include_topography: includeTopography,
+                        include_landcover: includeLandcover,
                     }),
                 })
                     .then((response) => {
@@ -565,76 +609,98 @@
                                         i < data.time_series.data.length;
                                         i++
                                     ) {
-                                        tableHtml += `<tr><td>${
-                                            data.time_series.data[i].date
-                                        }</td><td>${data.time_series.data[
-                                            i
-                                        ].ndvi.toFixed(3)}</td></tr>`;
+                                        tableHtml += `<tr>
+                                            <td>${
+                                                data.time_series.data[i].date
+                                            }</td>
+                                            <td>${data.time_series.data[
+                                                i
+                                            ].ndvi.toFixed(3)}</td>
+                                        </tr>`;
                                     }
                                     tableHtml += "</table>";
+
                                     timeSeriesInfo.innerHTML += tableHtml;
-                                } // Add RGB visualization if available
-                                if (data.time_series.rgb_visualization) {
-                                    const rgbLayer = L.tileLayer(
-                                        data.time_series.rgb_visualization.url,
-                                        {
-                                            attribution:
-                                                data.ndvi_tiles.attribution,
-                                            maxZoom: 18,
-                                        }
-                                    );
-
-                                    layers["RGB Time Comparison"] = rgbLayer;
-
-                                    // Add description
-                                    timeSeriesInfo.innerHTML += `
-                                        <p style="margin-top:10px;"><strong>RGB Visualization:</strong><br>
-                                        Red: ${data.time_series.rgb_visualization.dates[0]}<br>
-                                        Green: ${data.time_series.rgb_visualization.dates[1]}<br>
-                                        Blue: ${data.time_series.rgb_visualization.dates[2]}</p>
-                                        <p style="font-size: 0.8em;">Areas with more red show early NDVI, green shows middle period, blue shows recent NDVI.</p>
-                                    `;
                                 }
                             } else {
                                 timeSeriesInfo.innerHTML =
-                                    "<p>No time series data available for this area and date range.</p>";
+                                    "<p>No NDVI data found for the selected area and time period.</p>";
                             }
                         } else {
-                            // Hide time series container
                             timeSeriesContainer.style.display = "none";
                         }
 
-                        // Add layer control if we have multiple layers
-                        if (Object.keys(layers).length > 1) {
-                            // Add layer control
-                            L.control.layers(layers).addTo(map);
+                        // Handle additional environmental data if available
+                        const additionalDataContainer = document.getElementById(
+                            "additionalDataContainer"
+                        );
+                        const additionalDataInfo =
+                            document.getElementById("additionalDataInfo");
+
+                        if (data.additional_data) {
+                            // Show additional data container
+                            additionalDataContainer.style.display = "block";
+
+                            // Clear previous content
+                            additionalDataInfo.innerHTML = "";
+
+                            // Weather data
+                            if (data.additional_data.weather) {
+                                const weather = data.additional_data.weather;
+                                additionalDataInfo.innerHTML += `
+                                    <h5>Weather Data</h5>
+                                    <p>Temperature: ${weather.temperature_2m_max}°C (max), ${weather.temperature_2m_min}°C (min)</p>
+                                    <p>Precipitation: ${weather.precipitation_sum} mm</p>
+                                    <p>Wind Speed: ${weather.wind_speed_10m_max} km/h (max)</p>
+                                `;
+                            }
+
+                            // Topography data
+                            if (data.additional_data.topography) {
+                                const topo = data.additional_data.topography;
+                                additionalDataInfo.innerHTML += `
+                                    <h5>Topography Data</h5>
+                                    <p>Elevation Range: ${topo.elevation_range_min} to ${topo.elevation_range_max} m</p>
+                                    <p>Slope Range: ${topo.slope_range_min} to ${topo.slope_range_max}°</p>
+                                `;
+                            } // Land Cover data
+                            if (data.additional_data.landcover) {
+                                const landcover =
+                                    data.additional_data.landcover;
+                                additionalDataInfo.innerHTML += `
+                                    <h5>Land Cover Data</h5>
+                                    <p>Dominant Land Cover: ${
+                                        landcover.land_cover.dominant_class ||
+                                        "N/A"
+                                    }</p>
+                                    <p>Tree Cover: ${
+                                        landcover.vegetation.tree_cover_percent
+                                            ? landcover.vegetation.tree_cover_percent.toFixed(
+                                                  1
+                                              )
+                                            : "N/A"
+                                    }%</p>
+                                    <p>Other Vegetation: ${
+                                        landcover.vegetation
+                                            .non_tree_vegetation_percent
+                                            ? landcover.vegetation.non_tree_vegetation_percent.toFixed(
+                                                  1
+                                              )
+                                            : "N/A"
+                                    }%</p>
+                                `;
+                            }
+                        } else {
+                            additionalDataContainer.style.display = "none";
                         }
 
-                        statusEl.textContent = `NDVI data loaded successfully! Source: ${data.ndvi_tiles.satellite}`;
-
-                        // Add a legend for NDVI values
-                        if (!window.legend) {
-                            window.legend = L.control({
-                                position: "bottomright",
-                            });
-                            window.legend.onAdd = function () {
-                                const div = L.DomUtil.create("div", "legend");
-                                div.innerHTML =
-                                    "<h4>NDVI Values</h4>" +
-                                    '<i style="background: #FFFFFF"></i> 0.0 (Low)<br>' +
-                                    '<i style="background: #F1B555"></i> 0.25<br>' +
-                                    '<i style="background: #99B718"></i> 0.5<br>' +
-                                    '<i style="background: #3E8601"></i> 0.75<br>' +
-                                    '<i style="background: #004C00"></i> 1.0 (High)<br>' +
-                                    "<p>Higher values = Healthier vegetation</p>";
-                                return div;
-                            };
-                            window.legend.addTo(map);
-                        }
+                        statusEl.textContent =
+                            "NDVI data fetched successfully.";
                     })
                     .catch((error) => {
-                        statusEl.textContent = `Error: ${error.message}`;
-                        console.error("Error:", error);
+                        console.error("Error fetching NDVI data:", error);
+                        statusEl.textContent =
+                            "Error fetching NDVI data. Please try again.";
                     });
             });
 
@@ -654,31 +720,32 @@
                     window.legend = null;
                 }
 
+                // Remove all custom layers
+                Object.keys(layers || {}).forEach((key) => {
+                    if (map.hasLayer(layers[key])) {
+                        map.removeLayer(layers[key]);
+                    }
+                });
+
                 // Reset variables
                 polygon = null;
 
                 // Disable fetch button
                 fetchBtn.disabled = true;
 
+                // Hide additional data containers
+                document.getElementById("timeSeriesContainer").style.display =
+                    "none";
+                document.getElementById(
+                    "additionalDataContainer"
+                ).style.display = "none";
+
+                // Clear any existing content
+                document.getElementById("timeSeriesInfo").innerHTML = "";
+                document.getElementById("additionalDataInfo").innerHTML = "";
+
                 statusEl.textContent =
                     'Map cleared. Click "Draw Polygon" to start again.';
-            });
-
-            // Load Leaflet Draw plugin
-            document.addEventListener("DOMContentLoaded", function () {
-                const script = document.createElement("script");
-                script.src =
-                    "https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js";
-                document.head.appendChild(script);
-
-                // Also load the CSS
-                const link = document.createElement("link");
-                link.rel = "stylesheet";
-                link.href =
-                    "https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css";
-                document.head.appendChild(link);
-
-                statusEl.textContent = 'Ready. Click "Draw Polygon" to start.';
             });
         </script>
     </body>

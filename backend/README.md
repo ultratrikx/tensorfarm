@@ -111,19 +111,25 @@ The API will be available at http://localhost:8000
     "satellite_source": "sentinel-2",
     "start_date": "2024-11-01",
     "end_date": "2025-05-01",
-    "time_series": false
+    "time_series": false,
+    "include_weather": false,
+    "include_topography": false,
+    "include_landcover": false
 }
 ```
 
 **Parameters:**
 
-| Parameter          | Type    | Description                                                                   | Default        |
-| ------------------ | ------- | ----------------------------------------------------------------------------- | -------------- |
-| `polygon`          | Object  | GeoJSON polygon object defining the area of interest                          | Required       |
-| `satellite_source` | String  | Satellite data source to use: `"sentinel-2"`, `"landsat-8"`, or `"landsat-9"` | `"sentinel-2"` |
-| `start_date`       | String  | Start date for the time period (YYYY-MM-DD)                                   | `"2024-11-01"` |
-| `end_date`         | String  | End date for the time period (YYYY-MM-DD)                                     | `"2025-05-01"` |
-| `time_series`      | Boolean | Whether to include time series data in the response                           | `false`        |
+| Parameter            | Type    | Description                                                                   | Default        |
+| -------------------- | ------- | ----------------------------------------------------------------------------- | -------------- |
+| `polygon`            | Object  | GeoJSON polygon object defining the area of interest                          | Required       |
+| `satellite_source`   | String  | Satellite data source to use: `"sentinel-2"`, `"landsat-8"`, or `"landsat-9"` | `"sentinel-2"` |
+| `start_date`         | String  | Start date for the time period (YYYY-MM-DD)                                   | `"2024-11-01"` |
+| `end_date`           | String  | End date for the time period (YYYY-MM-DD)                                     | `"2025-05-01"` |
+| `time_series`        | Boolean | Whether to include time series data in the response                           | `false`        |
+| `include_weather`    | Boolean | Whether to include weather data (temperature, precipitation)                  | `false`        |
+| `include_topography` | Boolean | Whether to include topographical data (elevation, slope, aspect)              | `false`        |
+| `include_landcover`  | Boolean | Whether to include land cover data (land cover classes, vegetation stats)     | `false`        |
 
 **Basic Response:**
 
@@ -215,6 +221,97 @@ timeSlider.addEventListener("input", function () {
     updateMapLayer(selectedItem.url);
 });
 ```
+
+## Additional Data Types
+
+The API supports retrieving additional environmental data for the selected region:
+
+### Weather Data
+
+When `include_weather` is set to `true`, the API returns historical weather data:
+
+```json
+{
+    "weather": {
+        "data": [
+            {
+                "date": "2024-11-05",
+                "temperature_celsius": 12.3,
+                "precipitation_mm": 2.5
+            },
+            {
+                "date": "2024-11-10",
+                "temperature_celsius": 10.8,
+                "precipitation_mm": 0.0
+            }
+            /* ... more dates ... */
+        ],
+        "count": 8
+    }
+}
+```
+
+### Topographical Data
+
+When `include_topography` is set to `true`, the API returns elevation and slope information:
+
+```json
+{
+    "topography": {
+        "elevation": {
+            "min_meters": 210.5,
+            "max_meters": 358.2,
+            "mean_meters": 285.6,
+            "tile_url": "https://earthengine.googleapis.com/map/..."
+        },
+        "slope": {
+            "min_degrees": 0.1,
+            "max_degrees": 35.8,
+            "mean_degrees": 12.3,
+            "tile_url": "https://earthengine.googleapis.com/map/..."
+        },
+        "aspect": {
+            "min_degrees": 0.0,
+            "max_degrees": 359.9,
+            "mean_degrees": 180.2
+        }
+    }
+}
+```
+
+### Land Cover Data
+
+When `include_landcover` is set to `true`, the API returns land cover classification and vegetation statistics:
+
+```json
+{
+    "landcover": {
+        "land_cover": {
+            "classes": {
+                "Tree cover": { "area_hectares": 125.6, "percentage": 45.3 },
+                "Cropland": { "area_hectares": 98.2, "percentage": 35.4 },
+                "Built-up": { "area_hectares": 28.5, "percentage": 10.3 }
+                /* ... other classes ... */
+            },
+            "dominant_class": "Tree cover",
+            "tile_url": "https://earthengine.googleapis.com/map/..."
+        },
+        "vegetation": {
+            "tree_cover_percent": 42.5,
+            "non_tree_vegetation_percent": 38.7,
+            "non_vegetated_percent": 18.8
+        }
+    }
+}
+```
+
+### Performance Considerations
+
+Including additional data types increases processing time and may result in slower API responses. For optimal performance:
+
+1. Only request data types you need for your analysis
+2. For time-critical applications, consider using these flags selectively
+3. The `include_landcover` option uses the most recent complete year's data
 
 ## Known Issues and Limitations
 
