@@ -85,7 +85,10 @@ export default function MapView({
                                 "<strong>Error:</strong> Polygon edges cannot cross!",
                         },
                         shapeOptions: {
-                            color: "#3388ff",
+                            color: "#ff0000", // Red color for better visibility over NDVI
+                            weight: 4,
+                            opacity: 1,
+                            fillOpacity: 0.3,
                         },
                     },
                 },
@@ -105,10 +108,11 @@ export default function MapView({
                     drawnItemsRef.current.clearLayers();
 
                     // Store reference to current polygon
-                    currentPolygonRef.current = layer;
-
-                    // Add the new layer
+                    currentPolygonRef.current = layer; // Add the new layer
                     drawnItemsRef.current.addLayer(layer);
+
+                    // Ensure the drawn polygon is always on top
+                    drawnItemsRef.current.bringToFront();
 
                     // Get the polygon coordinates
                     const latLngs = layer.getLatLngs()[0] as L.LatLng[];
@@ -158,9 +162,7 @@ export default function MapView({
                     // Generate a name based on the location
                     const name = `Selected Region (${center.lat.toFixed(
                         4
-                    )}, ${center.lng.toFixed(4)})`;
-
-                    // Pass the region data to parent component
+                    )}, ${center.lng.toFixed(4)})`; // Pass the region data to parent component
                     onRegionSelect({
                         name,
                         center: { lat: center.lat, lng: center.lng },
@@ -169,6 +171,11 @@ export default function MapView({
 
                     // Update popup
                     polygon.bindPopup(name).openPopup();
+
+                    // Ensure the drawn polygon stays on top
+                    if (drawnItemsRef.current) {
+                        drawnItemsRef.current.bringToFront();
+                    }
                 });
             }); // Event handler for when a polygon is deleted
             mapRef.current.on(L.Draw.Event.DELETED, () => {
@@ -217,15 +224,22 @@ export default function MapView({
         if (ndviLayerRef.current) {
             mapRef.current.removeLayer(ndviLayerRef.current);
             ndviLayerRef.current = null;
-        }
-
-        // Add new NDVI layer if URL is provided
+        } // Add new NDVI layer if URL is provided
         if (ndviTileUrl) {
             ndviLayerRef.current = L.tileLayer(ndviTileUrl, {
                 attribution: "Google Earth Engine | TensorFarm",
                 opacity: 0.7,
                 maxZoom: 19,
+                zIndex: 1, // Lower z-index so drawn polygons appear on top
             }).addTo(mapRef.current);
+
+            // Ensure drawn items layer is on top of NDVI layer
+            if (
+                drawnItemsRef.current &&
+                mapRef.current.hasLayer(drawnItemsRef.current)
+            ) {
+                drawnItemsRef.current.bringToFront();
+            }
         }
     }, [ndviTileUrl]); // Display selected region on the map (only when there's no current polygon from drawing)
     useEffect(() => {
@@ -241,21 +255,20 @@ export default function MapView({
             // Convert to Leaflet LatLngs
             const latLngs = selectedRegion.coordinates.map(
                 ([lat, lng]) => new L.LatLng(lat, lng)
-            );
-
-            // Create a polygon and add it to the map
+            ); // Create a polygon and add it to the map
             const polygon = new L.Polygon(latLngs, {
-                color: "#3388ff",
-                weight: 3,
-                opacity: 0.8,
-                fillOpacity: 0.2,
-            });
-
-            // Store reference to current polygon
+                color: "#ff0000", // Red color for better visibility over NDVI
+                weight: 4,
+                opacity: 1,
+                fillOpacity: 0.3,
+            }); // Store reference to current polygon
             currentPolygonRef.current = polygon;
 
             // Add to drawn items layer
             drawnItemsRef.current.addLayer(polygon);
+
+            // Ensure the drawn polygon is always on top
+            drawnItemsRef.current.bringToFront();
 
             // Add a popup with the region name
             polygon.bindPopup(selectedRegion.name);
