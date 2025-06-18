@@ -219,48 +219,94 @@ def get_ndvi_tiles(data: PolygonData):
                         })
                 
                 # Sort by date
-                time_series_data.sort(key=lambda x: x['date'])
-                
-                # Add to response
+                time_series_data.sort(key=lambda x: x['date'])                # Prepare the time series response structure with synchronized data
                 response["time_series"] = {
-                    "data": time_series_data,
-                    "count": len(time_series_data)
+                    "data": [],  # Will contain integrated data for each date (NDVI value and tile URL)
+                    "count": len(time_series_data),
+                    "timestamps": sorted(list(set([item["date"] for item in time_series_data]))),  # Sorted unique dates
+                    "summary": {
+                        "min_ndvi": min([item["ndvi"] for item in time_series_data]) if time_series_data else None,
+                        "max_ndvi": max([item["ndvi"] for item in time_series_data]) if time_series_data else None,
+                        "mean_ndvi": sum([item["ndvi"] for item in time_series_data]) / len(time_series_data) if time_series_data else None
+                    }
                 }
                 
-                # Create a time series visualization if there are at least 2 dates
-                if len(time_series_data) >= 2:
-                    # Create an RGB visualization showing NDVI change over time (beginning, middle, end)
-                    if len(time_series_data) >= 3:
+                # Generate tile URLs for each date in the time series and integrate with NDVI data
+                for i in range(size):
+                    try:
+                        image = ee.Image(images_list.get(i))
+                        date = ee.Date(image.get('system:time_start')).format('YYYY-MM-dd').getInfo()
+                        
+                        # Get NDVI band and create a tile URL for this specific date
+                        ndvi_image = image.select('NDVI')
+                        date_map_id = ndvi_image.getMapId(vis_params)
+                        
+                        # Find the corresponding NDVI value for this date
+                        ndvi_value = next((item["ndvi"] for item in time_series_data if item["date"] == date), None)
+                        
+                        if ndvi_value is not None:
+                            # Add integrated data (both NDVI value and tile URL) for this date
+                            response["time_series"]["data"].append({
+                                "date": date,
+                                "ndvi": ndvi_value,
+                                "url": date_map_id['tile_fetcher'].url_format
+                            })
+                    except Exception as e:
+                        logger.warning(f"Could not generate tiles for date {i}: {e}")
+                  # Create a time series visualization if there are at least 2 dates
+                if len(time_series_data) >= 3:
+                    try:
+                        # Sort the data for proper time progression
+                        sorted_dates = sorted(response["time_series"]["data"], key=lambda x: x["date"])
+                        
+                        # Use specific indices for beginning, middle, and end
                         first_idx = 0
-                        middle_idx = len(time_series_data) // 2
-                        last_idx = len(time_series_data) - 1
+                        middle_idx = len(sorted_dates) // 2
+                        last_idx = len(sorted_dates) - 1
                         
-                        # Get the first, middle, and last images
-                        first_image = ee.Image(images_list.get(first_idx))
-                        middle_image = ee.Image(images_list.get(middle_idx)) 
-                        last_image = ee.Image(images_list.get(last_idx))
+                        # Find the images corresponding to these dates
+                        first_date = sorted_dates[first_idx]["date"]
+                        middle_date = sorted_dates[middle_idx]["date"]
+                        last_date = sorted_dates[last_idx]["date"]
                         
-                        # Create RGB composite (R = first date, G = middle date, B = last date)
-                        rgb_vis = ee.Image.rgb(
-                            first_image.select('NDVI'),
-                            middle_image.select('NDVI'),
-                            last_image.select('NDVI')
-                        )
+                        # Get the first, middle, and last images by finding them in the images_list
+                        first_image = None
+                        middle_image = None
+                        last_image = None
                         
-                        # Add RGB visualization to response
-                        rgb_map_id = rgb_vis.getMapId({
-                            'min': 0,
-                            'max': 1
-                        })
+                        for i in range(size):
+                            image = ee.Image(images_list.get(i))
+                            date = ee.Date(image.get('system:time_start')).format('YYYY-MM-dd').getInfo()
+                            
+                            if date == first_date:
+                                first_image = image
+                            elif date == middle_date:
+                                middle_image = image
+                            elif date == last_date:
+                                last_image = image
                         
-                        response["time_series"]["rgb_visualization"] = {
-                            "url": rgb_map_id['tile_fetcher'].url_format,
-                            "dates": [
-                                time_series_data[first_idx]['date'],  # First date
-                                time_series_data[middle_idx]['date'],  # Middle date
-                                time_series_data[last_idx]['date']   # Last date
-                            ]
-                        }
+                        # Create RGB composite if we found all necessary images
+                        if first_image and middle_image and last_image:
+                            # Create RGB composite (R = first date, G = middle date, B = last date)
+                            rgb_vis = ee.Image.rgb(
+                                first_image.select('NDVI'),
+                                middle_image.select('NDVI'),
+                                last_image.select('NDVI')
+                            )
+                            
+                            # Add RGB visualization to response
+                            rgb_map_id = rgb_vis.getMapId({
+                                'min': 0,
+                                'max': 1
+                            })
+                            
+                            response["time_series"]["rgb_visualization"] = {
+                                "url": rgb_map_id['tile_fetcher'].url_format,
+                                "dates": [first_date, middle_date, last_date]
+                            }
+                    except Exception as e:
+                        logger.error(f"Error generating RGB visualization: {e}")
+                        # Continue without RGB visualization
             except Exception as e:
                 logger.error(f"Error generating time series data: {e}")
                 response["time_series"] = {"error": str(e)}

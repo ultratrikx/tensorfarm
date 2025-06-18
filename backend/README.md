@@ -152,18 +152,68 @@ When `time_series` is set to `true`, additional data is returned:
     },
     "time_series": {
         "data": [
-            { "date": "2024-11-15", "ndvi": 0.65 },
-            { "date": "2024-12-08", "ndvi": 0.58 },
-            { "date": "2025-01-12", "ndvi": 0.45 }
+            {
+                "date": "2024-11-15",
+                "ndvi": 0.65,
+                "url": "https://earthengine.googleapis.com/map/..."
+            },
+            {
+                "date": "2024-12-08",
+                "ndvi": 0.58,
+                "url": "https://earthengine.googleapis.com/map/..."
+            }
             /* ... more dates ... */
         ],
         "count": 8,
+        "timestamps": ["2024-11-15", "2024-12-08", "2025-01-12" /* ... */],
+        "summary": {
+            "min_ndvi": 0.45,
+            "max_ndvi": 0.65,
+            "mean_ndvi": 0.56
+        },
         "rgb_visualization": {
             "url": "https://earthengine.googleapis.com/map/...",
             "dates": ["2024-11-15", "2025-01-12", "2025-04-21"]
         }
     }
 }
+```
+
+## Using Time Series Data
+
+The API provides optimized time series data that integrates both NDVI values (for graphing) and tile URLs (for map display) in a single structure. This makes it easier to build interactive visualizations that synchronize maps and charts.
+
+### Key Benefits of the Integrated Time Series Format:
+
+1. **Synchronized Data Structure**: Each object in the `data` array contains both the NDVI value and corresponding tile URL for a specific date.
+
+2. **Statistical Summary**: The response includes min, max, and mean NDVI values for the entire time period.
+
+3. **Timestamps Array**: A separate array of all dates is provided for quick reference.
+
+4. **RGB Visualization**: A composite image showing changes over time (first date in red, middle in green, last in blue).
+
+### Example Usage with Time Slider:
+
+The demo frontend shows how to use this data structure to create an interactive time slider that:
+
+1. Displays the NDVI map for the selected date
+2. Shows the corresponding NDVI value
+3. Allows animation playback through the time series
+4. Displays a chart of NDVI values over time
+
+```javascript
+// Example of handling time slider changes
+timeSlider.addEventListener("input", function () {
+    const index = parseInt(this.value);
+    const selectedItem = data.time_series.data[index];
+
+    // Update UI with current NDVI value
+    valueDisplay.textContent = selectedItem.ndvi.toFixed(3);
+
+    // Update map with current tile
+    updateMapLayer(selectedItem.url);
+});
 ```
 
 ## Known Issues and Limitations

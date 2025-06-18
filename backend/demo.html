@@ -310,12 +310,11 @@
                         if (data.time_series) {
                             // Show time series container
                             timeSeriesContainer.style.display = "block";
-
                             if (
                                 data.time_series.data &&
                                 data.time_series.data.length > 0
                             ) {
-                                // Display basic info
+                                // Display basic info with additional statistics
                                 timeSeriesInfo.innerHTML = `
                                     <p>Found ${
                                         data.time_series.count
@@ -327,14 +326,197 @@
                                         data.time_series.data.length - 1
                                     ].date
                                 }</p>
+                                    <p>NDVI Range: ${data.time_series.summary.min_ndvi.toFixed(
+                                        3
+                                    )} to ${data.time_series.summary.max_ndvi.toFixed(
+                                    3
+                                )}</p>
+                                    <p>Average NDVI: ${data.time_series.summary.mean_ndvi.toFixed(
+                                        3
+                                    )}</p>
                                 `;
+
+                                // Add time slider controls if we have individual tiles
+                                if (
+                                    data.time_series.data &&
+                                    data.time_series.data.length > 0
+                                ) {
+                                    // Create a slider for date selection
+                                    const sliderContainer =
+                                        document.createElement("div");
+                                    sliderContainer.style.marginTop = "15px";
+                                    sliderContainer.innerHTML = `
+                                        <div style="display: flex; flex-direction: column; margin-bottom: 10px;">
+                                            <label for="timeSlider">Choose date: <span id="selectedDate">${
+                                                data.time_series.data[0].date
+                                            }</span> - NDVI: <span id="selectedNdvi">${data.time_series.data[0].ndvi.toFixed(
+                                        3
+                                    )}</span></label>
+                                            <input type="range" id="timeSlider" min="0" max="${
+                                                data.time_series.data.length - 1
+                                            }" value="0" style="width: 100%;">
+                                            <div style="display: flex; justify-content: space-between; font-size: 0.8em;">
+                                                <span>${
+                                                    data.time_series.data[0]
+                                                        .date
+                                                }</span>
+                                                <span>${
+                                                    data.time_series.data[
+                                                        data.time_series.data
+                                                            .length - 1
+                                                    ].date
+                                                }</span>
+                                            </div>
+                                        </div>
+                                        <button id="playTimeSeriesBtn">Play Animation</button>
+                                    `;
+                                    timeSeriesInfo.appendChild(sliderContainer);
+
+                                    // Add each time series date as a separate layer
+                                    const timeLayers = {};
+                                    data.time_series.data.forEach(
+                                        (item, index) => {
+                                            const timeLayer = L.tileLayer(
+                                                item.url,
+                                                {
+                                                    attribution:
+                                                        data.ndvi_tiles
+                                                            .attribution,
+                                                    maxZoom: 18,
+                                                }
+                                            );
+
+                                            // Store in our time layers object (will use to show/hide)
+                                            timeLayers[item.date] = timeLayer;
+
+                                            // Add to layer control
+                                            layers[`NDVI ${item.date}`] =
+                                                timeLayer;
+                                        }
+                                    );
+
+                                    // Show the first time layer by default
+                                    if (data.time_series.data.length > 0) {
+                                        let currentTimeLayer =
+                                            timeLayers[
+                                                data.time_series.data[0].date
+                                            ];
+                                        currentTimeLayer.addTo(map);
+
+                                        // Handle time slider changes
+                                        const timeSlider =
+                                            document.getElementById(
+                                                "timeSlider"
+                                            );
+                                        const selectedDateSpan =
+                                            document.getElementById(
+                                                "selectedDate"
+                                            );
+                                        const selectedNdviSpan =
+                                            document.getElementById(
+                                                "selectedNdvi"
+                                            );
+
+                                        timeSlider.addEventListener(
+                                            "input",
+                                            function () {
+                                                const index = parseInt(
+                                                    this.value
+                                                );
+                                                const selectedItem =
+                                                    data.time_series.data[
+                                                        index
+                                                    ];
+
+                                                // Update the displayed date and NDVI
+                                                selectedDateSpan.textContent =
+                                                    selectedItem.date;
+                                                selectedNdviSpan.textContent =
+                                                    selectedItem.ndvi.toFixed(
+                                                        3
+                                                    );
+
+                                                // Remove current time layer and add the selected one
+                                                Object.values(
+                                                    timeLayers
+                                                ).forEach((layer) => {
+                                                    if (map.hasLayer(layer)) {
+                                                        map.removeLayer(layer);
+                                                    }
+                                                });
+
+                                                timeLayers[
+                                                    selectedItem.date
+                                                ].addTo(map);
+                                            }
+                                        );
+
+                                        // Handle the play button for animation
+                                        const playBtn =
+                                            document.getElementById(
+                                                "playTimeSeriesBtn"
+                                            );
+                                        let animationInterval;
+
+                                        playBtn.addEventListener(
+                                            "click",
+                                            function () {
+                                                if (animationInterval) {
+                                                    // Stop animation if running
+                                                    clearInterval(
+                                                        animationInterval
+                                                    );
+                                                    animationInterval = null;
+                                                    playBtn.textContent =
+                                                        "Play Animation";
+                                                } else {
+                                                    // Start animation
+                                                    playBtn.textContent =
+                                                        "Stop Animation";
+                                                    let index = parseInt(
+                                                        timeSlider.value
+                                                    );
+
+                                                    animationInterval =
+                                                        setInterval(() => {
+                                                            index =
+                                                                (index + 1) %
+                                                                data.time_series
+                                                                    .data
+                                                                    .length;
+                                                            timeSlider.value =
+                                                                index;
+
+                                                            // Trigger the input event
+                                                            const event =
+                                                                new Event(
+                                                                    "input"
+                                                                );
+                                                            timeSlider.dispatchEvent(
+                                                                event
+                                                            );
+
+                                                            // Stop when we've gone through the whole series
+                                                            if (index === 0) {
+                                                                clearInterval(
+                                                                    animationInterval
+                                                                );
+                                                                animationInterval =
+                                                                    null;
+                                                                playBtn.textContent =
+                                                                    "Play Animation";
+                                                            }
+                                                        }, 1000); // Change every 1 second
+                                                }
+                                            }
+                                        );
+                                    }
+                                }
 
                                 // Create a simple chart of NDVI values over time
                                 const ctx = document
                                     .getElementById("timeSeriesChart")
-                                    .getContext("2d");
-
-                                // Prepare data for the chart
+                                    .getContext("2d"); // Prepare data for the chart
                                 const labels = data.time_series.data.map(
                                     (item) => item.date
                                 );
@@ -391,9 +573,7 @@
                                     }
                                     tableHtml += "</table>";
                                     timeSeriesInfo.innerHTML += tableHtml;
-                                }
-
-                                // Add RGB visualization if available
+                                } // Add RGB visualization if available
                                 if (data.time_series.rgb_visualization) {
                                     const rgbLayer = L.tileLayer(
                                         data.time_series.rgb_visualization.url,
@@ -412,6 +592,7 @@
                                         Red: ${data.time_series.rgb_visualization.dates[0]}<br>
                                         Green: ${data.time_series.rgb_visualization.dates[1]}<br>
                                         Blue: ${data.time_series.rgb_visualization.dates[2]}</p>
+                                        <p style="font-size: 0.8em;">Areas with more red show early NDVI, green shows middle period, blue shows recent NDVI.</p>
                                     `;
                                 }
                             } else {
