@@ -19,20 +19,71 @@ interface ChatMessage {
     content: string;
 }
 
+interface ChatContextData {
+    region: {
+        name: string;
+        coordinates: Array<[number, number]>;
+        center: { lat: number; lng: number };
+    };
+    currentData: {
+        date: string | undefined;
+        ndvi: number | undefined;
+        temperature: number | undefined;
+        precipitation: number | undefined;
+    };
+    timeSeriesSummary:
+        | {
+              min_ndvi: number | null;
+              max_ndvi: number | null;
+              mean_ndvi: number | null;
+          }
+        | undefined;
+    weather:
+        | {
+              data: Array<{
+                  date: string;
+                  temperature_celsius?: number;
+                  precipitation_mm?: number;
+              }>;
+              count: number;
+          }
+        | undefined;
+    landcover:
+        | {
+              land_cover: {
+                  classes: Record<
+                      string,
+                      { percentage: number; area_hectares: number }
+                  >;
+                  dominant_class: string;
+              };
+              vegetation: {
+                  tree_cover_percent: number;
+                  non_tree_vegetation_percent: number;
+                  non_vegetated_percent: number;
+              };
+          }
+        | undefined;
+    satelliteInfo: {
+        source: string;
+        startDate: string;
+        endDate: string;
+    };
+}
+
 interface ChatWindowProps {
     isOpen: boolean;
     onClose: () => void;
     selectedRegion: { name: string } | null;
     timelineData: TimelineData[];
     currentTimelineIndex: number;
+    contextData: ChatContextData | null;
 }
 
 export default function ChatWindow({
     isOpen,
     onClose,
-    selectedRegion,
-    timelineData,
-    currentTimelineIndex,
+    contextData,
 }: ChatWindowProps) {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState("");
@@ -65,19 +116,13 @@ export default function ChatWindow({
         setLoading(true);
 
         try {
-            const currentData = timelineData[currentTimelineIndex];
             const response = await fetch("/api/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     message: input,
-                    context: {
-                        selectedRegion,
-                        currentNdvi: currentData?.ndvi,
-                        temperature: currentData?.temperature,
-                        precipitation: currentData?.precipitation,
-                        date: currentData?.date,
-                    },
+                    context: contextData,
+                    messageHistory: messages,
                 }),
             });
 
@@ -120,7 +165,9 @@ export default function ChatWindow({
                         <div
                             key={index}
                             className={`flex ${
-                                msg.role === "user" ? "justify-end" : "justify-start"
+                                msg.role === "user"
+                                    ? "justify-end"
+                                    : "justify-start"
                             }`}
                         >
                             <div
@@ -147,8 +194,12 @@ export default function ChatWindow({
                     <div className="flex w-full space-x-2">
                         <Input
                             value={input}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInput(e.target.value)}
-                            onKeyPress={(e: React.KeyboardEvent) => e.key === "Enter" && handleSend()}
+                            onChange={(
+                                e: React.ChangeEvent<HTMLInputElement>
+                            ) => setInput(e.target.value)}
+                            onKeyPress={(e: React.KeyboardEvent) =>
+                                e.key === "Enter" && handleSend()
+                            }
                             placeholder="Type a message..."
                         />
                         <Button onClick={handleSend} disabled={loading}>

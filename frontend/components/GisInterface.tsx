@@ -9,11 +9,15 @@ import {
 } from "../services/api";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { format, subMonths } from "date-fns";
 import { TimelineData } from "../lib/timeline-store";
 import ChatWindow from "./ai/ChatWindow";
-import { Globe } from "lucide-react";
-import SidePanel from "./SidePanel";
+import { Globe, Loader2 } from "lucide-react";
+import { Progress } from "./ui/progress";
+import { cn } from "../lib/utils";
+import DataVisualization from "./charts/DataVisualization";
 
 // Import MapView dynamically with no SSR to avoid Leaflet issues
 const MapView = dynamic(() => import("../components/map/MapView"), {
@@ -24,6 +28,17 @@ const MapView = dynamic(() => import("../components/map/MapView"), {
         </div>
     ),
 });
+
+const VEGETATION_COLORS = {
+    Forest: "bg-emerald-500",
+    Grassland: "bg-lime-500",
+    Cropland: "bg-yellow-500",
+    Wetland: "bg-blue-500",
+    Urban: "bg-gray-500",
+    Barren: "bg-orange-500",
+    Water: "bg-blue-700",
+    "Snow/Ice": "bg-slate-200",
+} as const;
 
 export default function GisInterface() {
     const [selectedRegion, setSelectedRegion] = useState<{
@@ -42,10 +57,10 @@ export default function GisInterface() {
     const threeMonthsAgo = subMonths(today, 3);
 
     // Date range state for time series (using proper ISO string format)
-    const [startDate, setStartDate] = useState<string>(
+    const [startDate] = useState<string>(
         format(threeMonthsAgo, "yyyy-MM-dd")
     );
-    const [endDate, setEndDate] = useState<string>(format(today, "yyyy-MM-dd"));
+    const [endDate] = useState<string>(format(today, "yyyy-MM-dd"));
     const [userLocation, setUserLocation] = useState<{
         lat: number;
         lng: number;
@@ -121,6 +136,8 @@ export default function GisInterface() {
                     end_date: endDate,
                     time_series: true,
                     include_weather: true,
+                    include_landcover: true,
+                    satellite_source: "sentinel-2",
                 });
                 setNdviData(response);
             } catch (err: unknown) {
@@ -136,6 +153,42 @@ export default function GisInterface() {
 
         fetchData();
     }, [selectedRegion, startDate, endDate]);
+
+    // Pass comprehensive data to ChatWindow
+    const chatContextData = useMemo(() => {
+        if (!selectedRegion || !ndviData) return null;
+
+        const currentData = timelineData[currentTimelineIndex];
+        return {
+            region: {
+                name: selectedRegion.name,
+                coordinates: selectedRegion.coordinates,
+                center: selectedRegion.center,
+            },
+            currentData: {
+                date: currentData?.date,
+                ndvi: currentData?.ndvi,
+                temperature: currentData?.temperature,
+                precipitation: currentData?.precipitation,
+            },
+            timeSeriesSummary: ndviData.time_series?.summary,
+            weather: ndviData.weather,
+            topography: ndviData.topography,
+            landcover: ndviData.landcover,
+            satelliteInfo: {
+                source: ndviData.ndvi_tiles.satellite,
+                startDate,
+                endDate,
+            },
+        };
+    }, [
+        selectedRegion,
+        ndviData,
+        timelineData,
+        currentTimelineIndex,
+        startDate,
+        endDate,
+    ]);
 
     return (
         <div className="h-screen w-full flex flex-col">
@@ -156,15 +209,327 @@ export default function GisInterface() {
                         onTimelineChange={handleTimelineChange}
                         showTimeline={timelineData.length > 0}
                     />
-                </div>
-
+                </div>{" "}
                 {/* Side Panel */}
-                <SidePanel
-                    selectedRegion={selectedRegion}
-                    timelineData={timelineData}
-                    currentTimelineIndex={currentTimelineIndex}
-                />
+                <div className="w-1/2 h-full bg-background border-l overflow-hidden flex flex-col relative">
+                    {loading && (
+                        <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center">
+                            <div className="text-center space-y-4 bg-background/90 p-6 rounded-lg shadow-lg border">
+                                <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary" />
+                                <p className="text-sm font-medium">
+                                    Loading data...
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    Please wait while we analyze the region
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                    <Tabs
+                        defaultValue="info"
+                        className="flex-1 flex flex-col h-full"
+                    >
+                        <div className="shrink-0 p-4 border-b">
+                            <TabsList className="w-full">
+                                <TabsTrigger value="info" className="flex-1">
+                                    Information
+                                </TabsTrigger>
+                                <TabsTrigger
+                                    value="analysis"
+                                    className="flex-1"
+                                >
+                                    Analysis
+                                </TabsTrigger>
+                            </TabsList>
+                        </div>
+                        <div className="flex-1 overflow-hidden">
+                            <TabsContent
+                                value="info"
+                                className="h-full p-4 overflow-y-auto"
+                            >
+                                <div className="space-y-4">
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>
+                                                Region Information
+                                            </CardTitle>
+                                        </CardHeader>
+                                        <CardContent>
+                                            {selectedRegion ? (
+                                                <div className="space-y-2">
+                                                    <p className="text-sm text-muted-foreground">
+                                                        Selected Area
+                                                    </p>
+                                                    <p className="font-medium">
+                                                        {selectedRegion.name}
+                                                    </p>
+                                                    {timelineData[
+                                                        currentTimelineIndex
+                                                    ] && (
+                                                        <>
+                                                            <div className="grid grid-cols-2 gap-4 mt-4">
+                                                                <div>
+                                                                    <p className="text-sm text-muted-foreground">
+                                                                        NDVI
+                                                                    </p>
+                                                                    <p className="font-medium">
+                                                                        {timelineData[
+                                                                            currentTimelineIndex
+                                                                        ].ndvi?.toFixed(
+                                                                            4
+                                                                        ) ??
+                                                                            "N/A"}
+                                                                    </p>
+                                                                </div>
+                                                                {timelineData[
+                                                                    currentTimelineIndex
+                                                                ]
+                                                                    .temperature !==
+                                                                    undefined && (
+                                                                    <div>
+                                                                        <p className="text-sm text-muted-foreground">
+                                                                            Temperature
+                                                                        </p>
+                                                                        <p className="font-medium">
+                                                                            {timelineData[
+                                                                                currentTimelineIndex
+                                                                            ].temperature?.toFixed(
+                                                                                1
+                                                                            ) ??
+                                                                                "N/A"}
+                                                                            °C
+                                                                        </p>
+                                                                    </div>
+                                                                )}
+                                                                {timelineData[
+                                                                    currentTimelineIndex
+                                                                ]
+                                                                    .precipitation !==
+                                                                    undefined && (
+                                                                    <div>
+                                                                        <p className="text-sm text-muted-foreground">
+                                                                            Precipitation
+                                                                        </p>
+                                                                        <p className="font-medium">
+                                                                            {timelineData[
+                                                                                currentTimelineIndex
+                                                                            ].precipitation?.toFixed(
+                                                                                1
+                                                                            ) ??
+                                                                                "N/A"}
+                                                                            mm
+                                                                        </p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <p className="text-muted-foreground">
+                                                    Select a region on the map
+                                                    to see details
+                                                </p>
+                                            )}
+                                        </CardContent>
+                                    </Card>
 
+                                    {ndviData?.landcover && (
+                                        <Card>
+                                            <CardHeader>
+                                                <CardTitle>
+                                                    Land Cover
+                                                </CardTitle>
+                                            </CardHeader>
+                                            <CardContent>
+                                                <div className="space-y-4">
+                                                    <div>
+                                                        <p className="text-sm text-muted-foreground">
+                                                            Dominant Class
+                                                        </p>
+                                                        <p className="font-medium">
+                                                            {
+                                                                ndviData
+                                                                    .landcover
+                                                                    .land_cover
+                                                                    .dominant_class
+                                                            }
+                                                        </p>
+                                                    </div>
+                                                    <div className="grid grid-cols-3 gap-4">
+                                                        <div>
+                                                            <p className="text-sm text-muted-foreground">
+                                                                Tree Cover
+                                                            </p>
+                                                            <p className="font-medium">
+                                                                {
+                                                                    ndviData
+                                                                        .landcover
+                                                                        .vegetation
+                                                                        .tree_cover_percent
+                                                                }
+                                                                %
+                                                            </p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm text-muted-foreground">
+                                                                Other Vegetation
+                                                            </p>
+                                                            <p className="font-medium">
+                                                                {
+                                                                    ndviData
+                                                                        .landcover
+                                                                        .vegetation
+                                                                        .non_tree_vegetation_percent
+                                                                }
+                                                                %
+                                                            </p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm text-muted-foreground">
+                                                                Non-Vegetated
+                                                            </p>
+                                                            <p className="font-medium">
+                                                                {
+                                                                    ndviData
+                                                                        .landcover
+                                                                        .vegetation
+                                                                        .non_vegetated_percent
+                                                                }
+                                                                %
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    )}
+                                </div>
+                            </TabsContent>
+
+                            <TabsContent
+                                value="analysis"
+                                className="h-full p-4 overflow-y-auto"
+                            >
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    {ndviData?.landcover && (
+                                        <Card className="lg:col-span-2">
+                                            <CardHeader>
+                                                <CardTitle>
+                                                    Land Cover Analysis
+                                                </CardTitle>
+                                            </CardHeader>
+                                            <CardContent className="grid gap-4 grid-cols-1 md:grid-cols-2">
+                                                {Object.entries(
+                                                    ndviData.landcover
+                                                        .land_cover.classes
+                                                ).map(([className, data]) => (
+                                                    <div
+                                                        key={className}
+                                                        className="space-y-2 bg-muted/50 p-3 rounded-lg"
+                                                    >
+                                                        <div className="flex justify-between items-center">
+                                                            <div className="flex items-center gap-2">
+                                                                <div
+                                                                    className={cn(
+                                                                        "w-4 h-4 rounded-full",
+                                                                        VEGETATION_COLORS[
+                                                                            className as keyof typeof VEGETATION_COLORS
+                                                                        ] ||
+                                                                            "bg-gray-400"
+                                                                    )}
+                                                                />
+                                                                <span className="text-sm font-medium">
+                                                                    {className}
+                                                                </span>
+                                                            </div>
+                                                            <span className="text-sm font-medium">
+                                                                {data.percentage.toFixed(
+                                                                    1
+                                                                )}
+                                                                %
+                                                            </span>
+                                                        </div>
+                                                        <Progress
+                                                            value={
+                                                                data.percentage
+                                                            }
+                                                            className="h-2"
+                                                        >
+                                                            <div
+                                                                className={cn(
+                                                                    "h-full w-full absolute",
+                                                                    VEGETATION_COLORS[
+                                                                        className as keyof typeof VEGETATION_COLORS
+                                                                    ] ||
+                                                                        "bg-gray-400"
+                                                                )}
+                                                            />
+                                                        </Progress>
+                                                        <p className="text-xs text-muted-foreground">
+                                                            Area:{" "}
+                                                            {data.area_hectares.toFixed(
+                                                                1
+                                                            )}{" "}
+                                                            ha
+                                                        </p>
+                                                    </div>
+                                                ))}
+                                            </CardContent>
+                                        </Card>
+                                    )}
+
+                                    {selectedRegion &&
+                                        timelineData.length > 0 && (
+                                            <>
+                                                <Card className="lg:col-span-2">
+                                                    <CardHeader>
+                                                        <CardTitle>
+                                                            NDVI Trends
+                                                        </CardTitle>
+                                                    </CardHeader>
+                                                    <CardContent className="h-[250px]">
+                                                        <DataVisualization
+                                                            data={timelineData}
+                                                            type="ndvi"
+                                                        />
+                                                    </CardContent>
+                                                </Card>
+
+                                                <Card>
+                                                    <CardHeader>
+                                                        <CardTitle>
+                                                            Temperature Trends
+                                                        </CardTitle>
+                                                    </CardHeader>
+                                                    <CardContent className="h-[250px]">
+                                                        <DataVisualization
+                                                            data={timelineData}
+                                                            type="temperature"
+                                                        />
+                                                    </CardContent>
+                                                </Card>
+
+                                                <Card>
+                                                    <CardHeader>
+                                                        <CardTitle>
+                                                            Precipitation Trends
+                                                        </CardTitle>
+                                                    </CardHeader>
+                                                    <CardContent className="h-[250px]">
+                                                        <DataVisualization
+                                                            data={timelineData}
+                                                            type="precipitation"
+                                                        />
+                                                    </CardContent>
+                                                </Card>
+                                            </>
+                                        )}
+                                </div>
+                            </TabsContent>
+                        </div>
+                    </Tabs>
+                </div>
                 {/* Floating AI Chat Button */}
                 <div className="absolute bottom-4 right-4">
                     <Button
@@ -174,13 +539,13 @@ export default function GisInterface() {
                         <Globe size={32} />
                     </Button>
                 </div>
-
                 <ChatWindow
                     isOpen={isChatOpen}
                     onClose={() => setChatOpen(false)}
                     selectedRegion={selectedRegion}
                     timelineData={timelineData}
                     currentTimelineIndex={currentTimelineIndex}
+                    contextData={chatContextData}
                 />
             </div>
         </div>
